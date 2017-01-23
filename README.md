@@ -1,5 +1,39 @@
-# ptmerge
-Service for merging two FHIR based patient records
+# ptmerge [![Build Status](https://travis-ci.org/mitre/ptmerge.svg)](https://travis-ci.org/mitre/ptmerge)
+A service for merging two FHIR based patient records.
+
+## Environment
+
+This project currently uses Go 1.7 and is built using the Go toolchain.
+
+To install Go, follow the instructions found at the [Go Website](http://golang.org/doc/install).
+
+Following standard Go practices, you should clone this project to:
+
+    $GOPATH/src/github.com/mitre/ptmerge
+
+Assuming your working directory is $GOPATH/src/github.com/mitre, the git command will look like:
+
+    git clone https://github.com/mitre/ptmerge.git
+
+This project uses [Glide](https://github.com/Masterminds/glide) to manage dependencies. To get all of
+the needed run:
+
+    go get github.com/Masterminds/glide
+    glide install
+
+To run all of the tests for this project, run:
+
+    go test $(glide novendor)
+
+in this directory.
+
+This project also requires MongoDB 3.2.* or higher. To install MongoDB, refer to the
+[MongoDB installation guide](http://docs.mongodb.org/manual/installation/).
+
+To start the application, simply run ptmerge.go:
+
+    go run ptmerge.go
+
 
 ## LICENSE
 Copyright 2017 The MITRE Corporation
