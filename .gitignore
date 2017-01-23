@@ -25,3 +25,6 @@ _testmain.go
 
 # PTMerge binary
 ptmerge
+
+# Glide dependency management
+vendor/**
