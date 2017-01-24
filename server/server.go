@@ -9,7 +9,7 @@ import (
 	mgo "gopkg.in/mgo.v2"
 )
 
-// PTMergeServer contains the router and database connection needed to server the
+// PTMergeServer contains the router and database connection needed to serve the
 // patient merging service.
 type PTMergeServer struct {
 	Engine       *gin.Engine
