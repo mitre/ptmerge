@@ -1,12 +1,11 @@
 package server
 
 import (
+	"github.com/gin-gonic/gin"
+	mgo "gopkg.in/mgo.v2"
 	"log"
 	"net/http"
 	"os"
-
-	"github.com/gin-gonic/gin"
-	mgo "gopkg.in/mgo.v2"
 )
 
 // PTMergeServer contains the router and database connection needed to serve the
@@ -64,6 +63,7 @@ func (p *PTMergeServer) Run() {
 		os.Exit(1)
 	}
 	log.Printf("Connected to host FHIR server at %s\n", p.FHIRHost)
+	os.Setenv("FHIRHost", p.FHIRHost)
 
 	// register ptmerge service routes
 	RegisterRoutes(p.Engine, p.Session, p.DatabaseName, p.FHIRHost)

@@ -1,15 +1,16 @@
 package merge
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"strings"
-
-	"gopkg.in/mgo.v2/bson"
-
 	"github.com/intervention-engine/fhir/models"
 	"github.com/mitre/ptmerge/testutil"
+	"gopkg.in/mgo.v2/bson"
+	"log"
+	"net/http"
+	"strings"
+	"time"
 )
 
 // Merger is the top-level interface used to merge resources and resolve conflicts.
@@ -26,12 +27,41 @@ func NewMerger(fhirHost string) *Merger {
 	}
 }
 
+var myClient = &http.Client{Timeout: 10 * time.Second}
+
 // Merge attempts to merge two FHIR Bundles containing patient records. If a merge
 // is successful a new FHIR Bundle containing the merged patient record is returned.
 // If a merge fails, a FHIR Bundle containing one or more OperationOutcomes is
 // returned detailing the merge conflicts.
-func (m *Merger) Merge(source1, source2 string) (mergeID string, outcome *models.Bundle, err error) {
-	return mockMerge(source1, source2)
+
+func (m *Merger) Merge(source1ID, source2ID string) (mergeID string, outcome *models.Bundle, err error) {
+
+	source1 := new(models.Bundle)
+	source2 := new(models.Bundle)
+	mergeID = ""
+
+	getJson(m.fhirHost+"/Patient/"+source1ID, source1)
+	getJson(m.fhirHost+"/Patient/"+source2ID, source2)
+
+	// Encode POST bundle
+	// Currently using an ID-stripped source1 instance to mock a new Patient resource
+	buf := bytes.NewBuffer(nil)
+	enc := json.NewEncoder(buf)
+	jstr := enc.Encode(source1)
+	if jstr != nil {
+		log.Fatal(jstr)
+	}
+	req, err := http.NewRequest("POST", m.fhirHost+"/Patient", buf)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := myClient.Do(req)
+	if err != nil {
+		fmt.Println("Could not reach server ", m.fhirHost)
+	}
+	targetBundle := new(models.Bundle)
+	json.NewDecoder(resp.Body).Decode(&targetBundle)
+	return mergeID, targetBundle, err
+
 }
 
 // ResolveConflict attempts to resolve a single merge conflict. If the conflict
@@ -157,4 +187,14 @@ func deleteResource(resourceURI string) error {
 		return fmt.Errorf("Resource %s was not deleted", resourceURI)
 	}
 	return nil
+}
+
+func getJson(url string, target interface{}) error {
+	r, err := myClient.Get(url)
+
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	return json.NewDecoder(r.Body).Decode(&target)
 }
