@@ -1,5 +1,5 @@
-hash: c5b85d86f9fa14afd6048eb722f124254903f28feabc218c19b7ce5e162271c4
-updated: 2017-01-26T12:01:46.022785638-05:00
+hash: d21a0d7d2f549d87f4ac0db8e4f1d409b7c8e8203038dd74da687a50e652e2e0
+updated: 2017-01-26T13:12:03.119880116-05:00
 imports:
 - name: github.com/boj/redistore
   version: fc113767cd6b051980f260d6dbe84b2740c46ab0
@@ -35,7 +35,7 @@ imports:
   version: 84bff6d01560fb0b5a396ba29534e93fd00d09c6
 - name: github.com/intervention-engine/fhir
   version: ffdbbf0fd38eef4edef052773901d71a5ff7a488
-  repo: git@github.com:intervention-engine/fhir.git
+  repo: https://github.com/intervention-engine/fhir.git
   vcs: git
   subpackages:
   - auth

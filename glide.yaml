@@ -4,7 +4,7 @@ import:
 - package: github.com/intervention-engine/fhir
   vcs: git
   version: stu3_aug2016
-  repo: git@github.com:intervention-engine/fhir.git
+  repo: https://github.com/intervention-engine/fhir.git
   subpackages:
   - models
   - server
