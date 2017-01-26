@@ -5,7 +5,7 @@ import (
 )
 
 // Merger is the top-level interface used to merge resources and resolve conflicts.
-type Merger struct{}
+type Merger struct {}
 
 // Merge attempts to merge two FHIR Bundles containing patient records. If a merge
 // is successful a new FHIR Bundle containing the merged patient record is returned.

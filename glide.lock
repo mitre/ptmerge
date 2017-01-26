@@ -1,6 +1,21 @@
-hash: f37f4643972a57f9d731644f1de7c8a2b4e8cb01260ced19bcd8196ff923ad0d
-updated: 2017-01-24T11:22:12.844617358-05:00
+hash: d21a0d7d2f549d87f4ac0db8e4f1d409b7c8e8203038dd74da687a50e652e2e0
+updated: 2017-01-26T13:12:03.119880116-05:00
 imports:
+- name: github.com/boj/redistore
+  version: fc113767cd6b051980f260d6dbe84b2740c46ab0
+- name: github.com/davecgh/go-spew
+  version: 5215b55f46b2b919f50a1df0eaa5886afe4e3b3d
+  subpackages:
+  - spew
+- name: github.com/garyburd/redigo
+  version: 908534c8b97586a4597e3fa195875d2d26502b97
+  subpackages:
+  - internal
+  - redis
+- name: github.com/gin-gonic/contrib
+  version: 4d2dccc9a4541014fec054e483cc76609b97fb16
+  subpackages:
+  - sessions
 - name: github.com/gin-gonic/gin
   version: e2212d40c62a98b388a5eb48ecbdcf88534688ba
   subpackages:
@@ -10,43 +25,82 @@ imports:
   version: 2402d76f3d41f928c7902a765dfc872356dd3aad
   subpackages:
   - proto
+- name: github.com/gorilla/context
+  version: 08b5f424b9271eedf6f9f0ce86cb9396ed337a42
+- name: github.com/gorilla/securecookie
+  version: fa5329f913702981df43dcb2a380bac429c810b5
+- name: github.com/gorilla/sessions
+  version: 83c8db3bdc9be789e57e3756ffbcffd2d7d40176
+- name: github.com/icrowley/fake
+  version: 84bff6d01560fb0b5a396ba29534e93fd00d09c6
 - name: github.com/intervention-engine/fhir
-  version: 18418abbece6c11d0522fb9e99ed1e72b06547ce
+  version: ffdbbf0fd38eef4edef052773901d71a5ff7a488
+  repo: https://github.com/intervention-engine/fhir.git
+  vcs: git
   subpackages:
+  - auth
   - models
+  - search
+  - server
+- name: github.com/itsjamie/gin-cors
+  version: 97b4a9da79331dfa2b6d35f4cdd1e50f5148859c
+- name: github.com/juju/errors
+  version: 6f54ff6318409d31ff16261533ce2c8381a4fd5d
 - name: github.com/manucorporat/sse
   version: ee05b128a739a0fb76c7ebd3ae4810c1de808d6d
 - name: github.com/mattn/go-isatty
   version: 30a891c33c7cde7b02a981314b4228ec99380cca
+- name: github.com/mitre/heart
+  version: 0c46b433a490476c34ce33205e87a72c8e0bc7ef
+- name: github.com/pmezard/go-difflib
+  version: 792786c7400a136282c1664665ae0a8db921c6c2
+  subpackages:
+  - difflib
+- name: github.com/stretchr/testify
+  version: f390dcf405f7b83c997eac1b06768bb9f44dec18
+  subpackages:
+  - assert
+  - require
+  - suite
 - name: golang.org/x/net
   version: f315505cf3349909cdf013ea56690da34e96a451
   subpackages:
   - context
+- name: golang.org/x/oauth2
+  version: 314dd2c0bf3ebd592ec0d20847d27e79d0dbe8dd
+  subpackages:
+  - internal
 - name: golang.org/x/sys
   version: d75a52659825e75fff6158388dddc6a5b04f9ba5
   subpackages:
   - unix
+- name: google.golang.org/appengine
+  version: a2c54d2174c17540446e0ced57d9d459af61bc1c
+  subpackages:
+  - internal
+  - internal/base
+  - internal/datastore
+  - internal/log
+  - internal/remote_api
+  - internal/urlfetch
+  - urlfetch
 - name: gopkg.in/go-playground/validator.v8
   version: c193cecd124b5cc722d7ee5538e945bdb3348435
 - name: gopkg.in/mgo.v2
   version: 3f83fa5005286a7fe593b055f0d7771a7dce4655
   subpackages:
   - bson
+  - dbtest
   - internal/json
+  - internal/sasl
+  - internal/scram
+- name: gopkg.in/square/go-jose.v1
+  version: aa2e30fdd1fe9dd3394119af66451ae790d50e0d
+  subpackages:
+  - cipher
+  - json
+- name: gopkg.in/tomb.v2
+  version: d5d1b5820637886def9eef33e03a27a9f166942c
 - name: gopkg.in/yaml.v2
   version: a5b47d31c556af34a302ce5d659e6fea44d90de0
-testImports:
-- name: github.com/davecgh/go-spew
-  version: 5215b55f46b2b919f50a1df0eaa5886afe4e3b3d
-  subpackages:
-  - spew
-- name: github.com/pmezard/go-difflib
-  version: 792786c7400a136282c1664665ae0a8db921c6c2
-  subpackages:
-  - difflib
-- name: github.com/stretchr/testify
-  version: 69483b4bd14f5845b5a1e55bca19e954e827f1d0
-  subpackages:
-  - assert
-  - require
-  - suite
+testImports: []
