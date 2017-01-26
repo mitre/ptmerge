@@ -1,12 +1,17 @@
 package: github.com/mitre/ptmerge
 import:
 - package: github.com/gin-gonic/gin
-  version: v1.1.4
 - package: github.com/intervention-engine/fhir
+  vcs: git
+  version: stu3_aug2016
+  repo: git@github.com:intervention-engine/fhir.git
   subpackages:
   - models
-testImport:
+  - server
 - package: github.com/stretchr/testify
-  version: v1.1.4
   subpackages:
   - suite
+- package: gopkg.in/mgo.v2
+  subpackages:
+  - bson
+  - dbtest
