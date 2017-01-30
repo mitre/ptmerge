@@ -43,19 +43,21 @@ func (m *Merger) Merge(source1ID, source2ID string) (mergeID string, outcome *mo
 	getJson(m.fhirHost+"/Patient/"+source1ID, source1)
 	getJson(m.fhirHost+"/Patient/"+source2ID, source2)
 
+	target := new(models.Bundle)
 	// Encode POST bundle
-	// Currently using an ID-stripped source1 instance to mock a new Patient resource
 	buf := bytes.NewBuffer(nil)
 	enc := json.NewEncoder(buf)
-	jstr := enc.Encode(source1)
+	jstr := enc.Encode(target)
 	if jstr != nil {
 		log.Fatal(jstr)
 	}
+
 	req, err := http.NewRequest("POST", m.fhirHost+"/Patient", buf)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := myClient.Do(req)
 	if err != nil {
+
 		fmt.Println("Could not reach server ", m.fhirHost)
 	}
 	targetBundle := new(models.Bundle)
