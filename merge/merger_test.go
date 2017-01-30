@@ -16,7 +16,8 @@ func TestMergerTestSuite(t *testing.T) {
 
 func (m *MergerTestSuite) TestMerge() {
 	merger := new(Merger)
-	outcome, err := merger.Merge("12345", "67890")
+	mergeID, outcome, err := merger.Merge("12345", "67890")
+	m.Equal("", mergeID)
 	m.Nil(outcome)
 	m.Nil(err)
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -104,9 +105,22 @@ func (s *ServerTestSuite) TestInitiateMerge() {
 func (s *ServerTestSuite) TestResolveConflict() {
 	mergeID := "12345"
 	conflictID := "67890"
+	resource := []byte(`
+	{
+		"resourceType": "Patient",
+		"id": "61ebe359-bfdc-4613-8bf2-c5e300945f2a",
+		"name": [{
+			"family": ["Abbott"],
+			"given": ["Clint"]
+		}],
+		"gender": "male",
+		"birthDate": "1950-09-02"
+	}
+	`)
+
 	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolve/" + conflictID
 
-	res, err := http.Post(req, "", nil)
+	res, err := http.Post(req, "application/json", bytes.NewBuffer(resource))
 	defer res.Body.Close()
 	s.NoError(err)
 
