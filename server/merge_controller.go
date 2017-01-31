@@ -7,6 +7,7 @@ import (
 	"github.com/intervention-engine/fhir/models"
 	"github.com/mitre/ptmerge/merge"
 	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 // MergeController manages the resource handlers for a Merge. MergeController
@@ -14,27 +15,71 @@ import (
 // database.
 type MergeController struct {
 	session  *mgo.Session
+	dbname   string
 	fhirHost string
 }
 
 // NewMergeController returns a pointer to a newly initialized MergeController.
-func NewMergeController(session *mgo.Session, fhirHost string) *MergeController {
+func NewMergeController(session *mgo.Session, dbname string, fhirHost string) *MergeController {
 	return &MergeController{
 		session:  session,
+		dbname:   dbname,
 		fhirHost: fhirHost,
 	}
 }
 
 // Merges 2 FHIR bundles of patient resources given the URLs to both bundles.
 func (m *MergeController) merge(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
 	source1 := c.Query("source1")
 	source2 := c.Query("source2")
 
-	merger := merge.NewMerger(m.fhirHost)
+	if source1 == "" || source2 == "" {
+		c.String(http.StatusBadRequest, "URL(s) referencing bundles to merge were not provided")
+		return
+	}
 
-	// Explicitly not collecting the return values from this stub.
-	merger.Merge(source1, source2)
-	c.String(http.StatusOK, "Merging records %s and %s", source1, source2)
+	merger := merge.NewMerger(m.fhirHost)
+	targetID, outcome, err := merger.Merge(source1, source2)
+
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if targetID == "" {
+		// The merge had no conflicts, just return the merged bundle.
+		c.JSON(http.StatusOK, outcome)
+		return
+	}
+
+	// Check outcome to get a list of merge conflict IDs, if any.
+	conflictIDs := []string{}
+	for _, entry := range outcome.Entry {
+		if entryIsOperationOutcome(entry) {
+			conflictIDs = append(conflictIDs, getConflictID(entry))
+		}
+	}
+
+	// Some conflicts exist, create a new record in mongo to manage this merge's state.
+	mergeID := bson.NewObjectId().Hex()
+	err = worker.DB(m.dbname).C("merges").Insert(&MergeState{
+		MergeID:        mergeID,
+		TargetBundleID: targetID,
+		ConflictIDs:    conflictIDs,
+	})
+
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Return the bundle of conflicts to resolve. The mergeID is passed in the Location header.
+	c.Header("Location", mergeID)
+	c.JSON(http.StatusCreated, outcome)
 }
 
 // Resolves a single merge confict given the OperationOutcome ID and the correct resource
@@ -67,4 +112,13 @@ func (m *MergeController) abort(c *gin.Context) {
 func (m *MergeController) getConflicts(c *gin.Context) {
 	mergeID := c.Param("merge_id")
 	c.String(http.StatusOK, "Merge conflicts for merge %s", mergeID)
+}
+
+func entryIsOperationOutcome(entry models.BundleEntryComponent) bool {
+	_, ok := entry.Resource.(*models.OperationOutcome)
+	return ok
+}
+
+func getConflictID(entry models.BundleEntryComponent) string {
+	return entry.Resource.(*models.OperationOutcome).Id
 }

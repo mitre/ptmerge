@@ -16,7 +16,7 @@ type PTMergeServer struct {
 	FHIRHost     string
 	DatabaseHost string
 	DatabaseName string
-	session      *mgo.Session
+	Session      *mgo.Session
 }
 
 // NewServer returns a newly initialized PTMergeServer.
@@ -32,7 +32,7 @@ func NewServer(fhirhost, dbhost, dbname string, debug bool) *PTMergeServer {
 		FHIRHost:     fhirhost,
 		DatabaseHost: dbhost,
 		DatabaseName: dbname,
-		session:      nil,
+		Session:      nil,
 	}
 }
 
@@ -53,8 +53,8 @@ func (p *PTMergeServer) Run() {
 	// this master database session should be copied using session.Copy()
 	// before making requests to the database. This protects the connection
 	// to mongo if for any reason a database operation times out.
-	p.session = session
-	defer p.session.Close()
+	p.Session = session
+	defer p.Session.Close()
 
 	// ping the host FHIR server to make sure it's running
 	log.Println("Connecting to host FHIR server...")
@@ -66,7 +66,7 @@ func (p *PTMergeServer) Run() {
 	log.Printf("Connected to host FHIR server at %s\n", p.FHIRHost)
 
 	// register ptmerge service routes
-	RegisterRoutes(p.Engine, p.session, p.FHIRHost)
+	RegisterRoutes(p.Engine, p.Session, p.DatabaseName, p.FHIRHost)
 	log.Println("Started ptmerge service!")
 
 	p.Engine.Run(":5000")
