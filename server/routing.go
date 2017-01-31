@@ -12,7 +12,7 @@ func RegisterRoutes(router *gin.Engine, session *mgo.Session, dbname string, fhi
 
 	// Merging and confict resolution
 	router.POST("/merge", mc.merge)
-	router.POST("/merge/:merge_id/resolve/:op_outcome_id", mc.resolve)
+	router.POST("/merge/:merge_id/resolve/:conflict_id", mc.resolve)
 	router.POST("/merge/:merge_id/abort", mc.abort)
 
 	// Convenience methods
