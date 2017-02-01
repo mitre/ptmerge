@@ -69,9 +69,9 @@ func (m *MergerTestSuite) TestResolveConflict() {
 }
 
 func (m *MergerTestSuite) TestAbort() {
+	// This test is a shell since the merger is only mocked up right now.
 	merger := NewMerger(m.FHIRServer.URL)
-	outcome, err := merger.Abort("", []string{})
-	m.Nil(outcome)
+	err := merger.Abort([]string{})
 	m.Nil(err)
 }
 
