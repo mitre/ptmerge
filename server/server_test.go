@@ -347,7 +347,7 @@ func (s *ServerTestSuite) TestResolveConflictConflictResolved() {
 }
 
 func (s *ServerTestSuite) TestResolveConflictConflictNotResolved() {
-	// TODO
+	// TODO - can't mock this until the Merger is actually fleshed out.
 }
 
 func (s *ServerTestSuite) TestResolveConflictMergeNotFound() {
@@ -445,18 +445,60 @@ func (s *ServerTestSuite) TestResolveConflictConflictNotFound() {
 // ========================================================================= //
 
 func (s *ServerTestSuite) TestAbortMerge() {
-	mergeID := "12345"
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/abort"
-
-	res, err := http.Post(req, "", nil)
-	defer res.Body.Close()
+	// Put a target bundle and a conflict on the host FHIR server.
+	conflict, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_2.json")
 	s.NoError(err)
+	s.NotNil(conflict)
+
+	target, err := testutil.PostPatientBundle(s.FHIRServer.URL, "../fixtures/two_conflicts/john_peters_bundle_1.json")
+
+	// Put the merge state in mongo.
+	conflicts := make(ConflictMap)
+	conflictID := conflict.Resource.Id
+	conflicts[conflictID] = s.FHIRServer.URL + "/OperationOutcome/" + conflictID
+	targetBundle := s.FHIRServer.URL + "/Bundle/" + target.Resource.Id
+	mergeID, err := s.insertMergeState(targetBundle, conflicts)
+	s.NoError(err)
+	s.NotEmpty(mergeID)
+
+	// Make the request.
+	res, err := http.Post(s.PTMergeServer.URL+"/merge/"+mergeID+"/abort", "", nil)
+
+	// Check the response. There should be no response body.
+	s.Equal(204, res.StatusCode)
+}
+
+func (s *ServerTestSuite) TestAbortMergeMergeNotFound() {
+	// Insert some merges into mongo so there's something to query against.
+	var err error
+	cid1 := bson.NewObjectId().Hex()
+	cid2 := bson.NewObjectId().Hex()
+	conflicts := ConflictMap{
+		cid1: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		cid2: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+	}
+	targetBundle := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
+	_, err = s.insertMergeState(targetBundle, conflicts)
+	s.NoError(err)
+	targetBundle = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
+	_, err = s.insertMergeState(targetBundle, conflicts)
+	s.NoError(err)
+	targetBundle = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
+	_, err = s.insertMergeState(targetBundle, conflicts)
+	s.NoError(err)
+
+	// Try to abort a merge that doesn't exist.
+	mergeID := bson.NewObjectId().Hex()
+	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/abort"
+	res, err := http.Post(req, "", nil)
+	s.NoError(err)
+	defer res.Body.Close()
 
 	body, err := ioutil.ReadAll(res.Body)
 	s.NoError(err)
 
-	s.Equal(200, res.StatusCode)
-	s.Equal(fmt.Sprintf("Aborting merge %s", mergeID), string(body))
+	s.Equal(404, res.StatusCode)
+	s.Equal(fmt.Sprintf("Merge %s not found", mergeID), string(body))
 }
 
 // ========================================================================= //

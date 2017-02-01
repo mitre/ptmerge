@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -183,13 +184,42 @@ func (m *MergeController) resolve(c *gin.Context) {
 
 // Aborts a merge given the merge's ID.
 func (m *MergeController) abort(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
 	mergeID := c.Param("merge_id")
 
-	merger := merge.NewMerger(m.fhirHost)
+	// Get the merge state from mongo.
+	var state MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&state)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			fmt.Printf("Got here\n")
+			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
 
-	// Explicitly not collecting the return values from this stub.
-	merger.Abort("", []string{})
-	c.String(http.StatusOK, "Aborting merge %s", mergeID)
+	// Extract an array of resource URIs to delete.
+	uris := make([]string, len(state.Conflicts)+1)
+	uris[0] = state.TargetBundle
+	for i, key := range state.Conflicts.Keys() {
+		uris[i+1] = state.Conflicts[key]
+	}
+
+	merger := merge.NewMerger(m.fhirHost)
+	err = merger.Abort(uris)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// All other Gin response handlers try to add a response body.
+	// 204 responses explicity do not have response body.
+	c.AbortWithStatus(204)
 }
 
 // Returns all unresolved merge conflicts for a given merge ID.

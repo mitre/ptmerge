@@ -43,11 +43,15 @@ func (m *Merger) ResolveConflict(targetBundle, opOutcome string, updatedResource
 	return mockResolveConflict(targetBundle, opOutcome, updatedResource)
 }
 
-// Abort aborts a merge in progress. The partially merged Bundle and any outstanding
-// OperationOutcomes are deleted. A Bundle with a successful OperationOutcome is returned
-// to the client in response.
-func (m *Merger) Abort(targetBundle string, opOutcomes []string) (outcome *models.OperationOutcome, err error) {
-	return
+// Abort aborts a merge in progress by deleting all resources related to the merge.
+func (m *Merger) Abort(resourceURIs []string) (err error) {
+	for _, uri := range resourceURIs {
+		err = deleteResource(uri)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ========================================================================= //
