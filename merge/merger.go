@@ -33,7 +33,6 @@ var myClient = &http.Client{Timeout: 10 * time.Second}
 // is successful a new FHIR Bundle containing the merged patient record is returned.
 // If a merge fails, a FHIR Bundle containing one or more OperationOutcomes is
 // returned detailing the merge conflicts.
-
 func (m *Merger) Merge(source1ID, source2ID string) (mergeID string, outcome *models.Bundle, err error) {
 
 	var isMatched bool
