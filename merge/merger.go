@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
+
+	"gopkg.in/mgo.v2/bson"
 
 	"github.com/intervention-engine/fhir/models"
 	"github.com/mitre/ptmerge/testutil"
-	"gopkg.in/mgo.v2/bson"
 )
 
 // Merger is the top-level interface used to merge resources and resolve conflicts.
@@ -26,8 +26,6 @@ func NewMerger(fhirHost string) *Merger {
 		fhirHost: fhirHost,
 	}
 }
-
-var myClient = &http.Client{Timeout: 10 * time.Second}
 
 // Merge attempts to merge two FHIR Bundles containing patient records. If a merge
 // is successful a new FHIR Bundle containing the merged patient record is returned.
@@ -104,7 +102,6 @@ func (m *Merger) Merge(source1ID, source2ID string) (mergeID string, outcome *mo
 	json.NewDecoder(resp.Body).Decode(&targetBundle)
 	mergeID = targetBundle.Id
 	return mergeID, targetBundle, err
-
 }
 
 // ResolveConflict attempts to resolve a single merge conflict. If the conflict
@@ -232,27 +229,6 @@ func deleteResource(resourceURI string) error {
 	return nil
 }
 
-func populateBundle(url string, target *models.Bundle) {
-
-	res, err := myClient.Get(url)
-	if err != nil {
-		panic(err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != 200 {
-		panic(err)
-	}
-
-	decoder := json.NewDecoder(res.Body)
-
-	err = decoder.Decode(&target)
-	if err != nil {
-		panic(err)
-	}
-	return
-}
-
 func getKeyData(source *models.Bundle) (given, family string) {
 
 	// Find Patient entry for both records and compare key data
@@ -271,4 +247,25 @@ func getKeyData(source *models.Bundle) (given, family string) {
 		}
 	}
 	return given, family
+}
+
+func populateBundle(url string, target *models.Bundle) {
+
+	res, err := http.Get(url)
+	if err != nil {
+		panic(err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		panic(err)
+	}
+
+	decoder := json.NewDecoder(res.Body)
+
+	err = decoder.Decode(&target)
+	if err != nil {
+		panic(err)
+	}
+	return
 }

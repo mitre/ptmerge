@@ -63,6 +63,7 @@ func (p *PTMergeServer) Run() {
 		os.Exit(1)
 	}
 	log.Printf("Connected to host FHIR server at %s\n", p.FHIRHost)
+	os.Setenv("FHIRHost", p.FHIRHost)
 
 	// register ptmerge service routes
 	RegisterRoutes(p.Engine, p.Session, p.DatabaseName, p.FHIRHost)
