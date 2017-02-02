@@ -1,0 +1,16 @@
+{
+  "resourceType" : "OperationOutcome",
+  "issue" : [{
+    "severity" : "information",
+    "code" : "informational",
+    "details" : {
+      "coding": [{
+        "system": "http://hl7.org/fhir/ValueSet/operation-outcome",
+        "code": "MSG_CREATED",
+        "display": "New resource created"
+      }],
+      "text": "New resource created"
+    },
+    "location" : ["/Bundle/Patient/Name/Given"]
+  }]
+}
