@@ -48,14 +48,29 @@ in this directory.
 This project also requires MongoDB 3.2.* or higher. To install MongoDB, refer to the
 [MongoDB installation guide](http://docs.mongodb.org/manual/installation/).
 
-Finally, this projct also requires a running host FHIR server. To install and start a go-based FHIR server, refer to the [GoFHIR Installation Instructions](https://github.com/synthetichealth/gofhir).
+Finally, this project also requires a running host FHIR server. To install and start a go-based FHIR server, refer to the [GoFHIR Installation Instructions](https://github.com/synthetichealth/gofhir).
 
 ## Running the Application
 
 To start the application, simply run ptmerge.go:
 
-    go run ptmerge.go
+```
+go run ptmerge.go
+```
 
+The ptmerge command also has several configuration options, with reasonable defaults:
+
+```
+Usage of ./ptmerge:
+  -db string
+    	The Mongo database used to host the ptmerge service (default "localhost:27017")
+  -dbname string
+    	The name of the Mongo database (default "ptmerge")
+  -debug
+    	Run the ptmerge service in debug mode (more verbose output)
+  -fhirhost string
+    	The FHIR server used to host the ptmerge service (default "http://localhost:3001")
+```
 
 ## License
 Copyright 2017 The MITRE Corporation
