@@ -1,4 +1,4 @@
-package server
+package state
 
 import (
 	"strings"
@@ -7,19 +7,28 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-type MergeStateTestSuite struct {
+type StateTestSuite struct {
 	suite.Suite
 }
 
-func TestMergeStateTestSuite(t *testing.T) {
-	suite.Run(t, new(MergeStateTestSuite))
+func TestStateTestSuite(t *testing.T) {
+	suite.Run(t, new(StateTestSuite))
 }
 
-func (m *MergeStateTestSuite) TestConflictKeys() {
+func (m *StateTestSuite) TestConflictKeys() {
 	conflicts := make(ConflictMap)
-	conflicts["foo"] = "bar"
-	conflicts["bar"] = "foo"
-	conflicts["hey"] = "ho"
+	conflicts["foo"] = ConflictState{
+		URL:      "foo",
+		Resolved: true,
+	}
+	conflicts["bar"] = ConflictState{
+		URL:      "bar",
+		Resolved: true,
+	}
+	conflicts["hey"] = ConflictState{
+		URL:      "hey",
+		Resolved: true,
+	}
 
 	expected := []string{"foo", "bar", "hey"} // Not necessarily in this order
 	keys := conflicts.Keys()
