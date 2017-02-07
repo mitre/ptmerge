@@ -82,6 +82,7 @@ func (m *MergeController) Merge(c *gin.Context) {
 	mergeID := bson.NewObjectId().Hex()
 	err = worker.DB(m.dbname).C("merges").Insert(&state.MergeState{
 		MergeID:   mergeID,
+		Completed: false,
 		TargetURL: targetURL,
 		Conflicts: conflictMap,
 	})
@@ -145,10 +146,22 @@ func (m *MergeController) Resolve(c *gin.Context) {
 		return
 	}
 
+	// Check that the merge is incomplete.
+	if mergeState.Completed {
+		c.String(http.StatusBadRequest, "Merge %s is complete, no remaining conflicts to resolve", mergeID)
+		return
+	}
+
 	// Check that the conflictID exists and is part of this merge.
 	conflict, found := mergeState.Conflicts[conflictID]
 	if !found {
 		c.String(http.StatusNotFound, "Merge conflict %s not found for merge %s", conflictID, mergeID)
+		return
+	}
+
+	// Check that the conflict wasn't already resolved.
+	if conflict.Resolved {
+		c.String(http.StatusBadRequest, "Merge conflict %s was already resolved for merge %s", conflictID, mergeID)
 		return
 	}
 
@@ -165,11 +178,17 @@ func (m *MergeController) Resolve(c *gin.Context) {
 	// and the target. The call to Merger.ResolveConflict() already deleted those
 	// resources on the host FHIR server.
 	if !isOperationOutcomeBundle(outcome) {
-		err = worker.DB(m.dbname).C("merges").RemoveId(mergeState.MergeID)
+		err = worker.DB(m.dbname).C("merges").Update(
+			bson.M{"_id": mergeID},                    // query
+			bson.M{"$set": bson.M{"completed": true}}, // update instruction
+		)
+
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
 			return
 		}
+
+		// TODO: Wipe the OperationOutcomes from the FHIR server?
 	}
 
 	// If the outcome is a bundle of OperationOutcomes describing the

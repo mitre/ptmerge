@@ -18,6 +18,7 @@ type Merge struct {
 // This is stored in the "merges" collection.
 type MergeState struct {
 	MergeID   string      `bson:"_id,omitempty" json:"id,omitempty"`
+	Completed bool        `bson:"completed" json:"completed"`
 	TargetURL string      `bson:"target,omitempty" json:"target,omitempty"`
 	Conflicts ConflictMap `bson:"conflicts,omitempty" json:"conflicts,omitempty"`
 }
