@@ -259,11 +259,18 @@ func (m *MergeController) Abort(c *gin.Context) {
 		return
 	}
 
-	// Extract an array of resource URLs to delete.
-	URLs := make([]string, len(mergeState.Conflicts)+1)
-	URLs[0] = mergeState.TargetURL
-	for i, key := range mergeState.Conflicts.Keys() {
-		URLs[i+1] = mergeState.Conflicts[key].URL
+	var URLs []string
+
+	if mergeState.Completed {
+		// If the merge is complete, just delete it's target.
+		URLs = []string{mergeState.TargetURL}
+	} else {
+		// If a merge is incomplete, delete it's target and all conflicts.
+		URLs = make([]string, len(mergeState.Conflicts)+1)
+		URLs[0] = mergeState.TargetURL
+		for i, key := range mergeState.Conflicts.Keys() {
+			URLs[i+1] = mergeState.Conflicts[key].URL
+		}
 	}
 
 	merger := merge.NewMerger(m.fhirHost)
