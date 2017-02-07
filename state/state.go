@@ -19,14 +19,14 @@ type Merge struct {
 type MergeState struct {
 	MergeID   string      `bson:"_id,omitempty" json:"id,omitempty"`
 	Completed bool        `bson:"completed" json:"completed"`
-	TargetURL string      `bson:"target,omitempty" json:"target,omitempty"`
+	TargetURL string      `bson:"target" json:"target"`
 	Conflicts ConflictMap `bson:"conflicts,omitempty" json:"conflicts,omitempty"`
 }
 
 // ConflictState represents the current state of a single merge conflict as it is
 // store in mongo. This is embedded in the MergeState object as a ConflictMap.
 type ConflictState struct {
-	URL      string `bson:"url,omitempty" json:"url,omitempty"`
+	URL      string `bson:"url" json:"url"`
 	Resolved bool   `bson:"resolved" json:"resolved"`
 	Deleted  bool   `bson:"deleted" json:"deleted"`
 }

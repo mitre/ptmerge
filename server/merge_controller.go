@@ -203,8 +203,10 @@ func (m *MergeController) Resolve(c *gin.Context) {
 				return
 			}
 
-			// Mark the conflict as "deleted".
+			// Mark the conflict as "deleted". Also clear it's URL, since the URL is no
+			// longer a valid reference to a FHIR resource.
 			mergeState.Conflicts[id].Deleted = true
+			mergeState.Conflicts[id].URL = ""
 		}
 
 		// Update the merge to "completed".
@@ -262,7 +264,9 @@ func (m *MergeController) Abort(c *gin.Context) {
 	var URLs []string
 
 	if mergeState.Completed {
-		// If the merge is complete, just delete it's target.
+		// If the merge is complete, just delete it's target. This operates on the assumption
+		// that conflict OperationOutcomes are deleted after a call to ResolveConflict resolves
+		// the last remaining conflict.
 		URLs = []string{mergeState.TargetURL}
 	} else {
 		// If a merge is incomplete, delete it's target and all conflicts.
