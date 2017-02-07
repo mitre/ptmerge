@@ -6,12 +6,14 @@ import (
 	"testing"
 
 	"github.com/intervention-engine/fhir/models"
+	"github.com/intervention-engine/fhir/server"
 	"github.com/mitre/ptmerge/testutil"
 	"github.com/stretchr/testify/suite"
 )
 
 type MergeControllerSuite struct {
-	suite.Suite
+	testutil.MongoSuite
+	FHIRServer server.FHIRServer
 }
 
 func TestMergeControllerSuite(t *testing.T) {

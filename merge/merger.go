@@ -3,13 +3,10 @@ package merge
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
-	"strings"
-
-	"gopkg.in/mgo.v2/bson"
 
 	"github.com/intervention-engine/fhir/models"
-	"github.com/mitre/ptmerge/testutil"
 )
 
 // Merger is the top-level interface used to merge resources and resolve conflicts.
@@ -30,8 +27,8 @@ func NewMerger(fhirHost string) *Merger {
 // is successful a new FHIR Bundle containing the merged patient record is returned.
 // If a merge fails, a FHIR Bundle containing one or more OperationOutcomes is
 // returned detailing the merge conflicts.
-func (m *Merger) Merge(source1, source2 string) (mergeID string, outcome *models.Bundle, err error) {
-	return mockMerge(source1, source2)
+func (m *Merger) Merge(source1, source2 string) (outcome *models.Bundle, targetURL string, err error) {
+	return
 }
 
 // ResolveConflict attempts to resolve a single merge conflict. If the conflict
@@ -39,14 +36,14 @@ func (m *Merger) Merge(source1, source2 string) (mergeID string, outcome *models
 // returned. If additional conflicts still exist or the conflict resolution was not
 // successful, a FHIR Bundle of OperationOutcomes is returned detailing the remaining
 // merge conflicts.
-func (m *Merger) ResolveConflict(targetBundle, opOutcome string, updatedResource interface{}) (outcome *models.Bundle, err error) {
-	return mockResolveConflict(targetBundle, opOutcome, updatedResource)
+func (m *Merger) ResolveConflict(targetURL, opOutcomeURL string, updatedResource interface{}) (outcome *models.Bundle, err error) {
+	return
 }
 
 // Abort aborts a merge in progress by deleting all resources related to the merge.
-func (m *Merger) Abort(resourceURIs []string) (err error) {
-	for _, uri := range resourceURIs {
-		err = deleteResource(uri)
+func (m *Merger) Abort(resourceURLs []string) (err error) {
+	for _, url := range resourceURLs {
+		err = DeleteResource(url)
 		if err != nil {
 			return err
 		}
@@ -54,96 +51,81 @@ func (m *Merger) Abort(resourceURIs []string) (err error) {
 	return nil
 }
 
-// ========================================================================= //
-// MOCKS                                                                     //
-// ========================================================================= //
-// I mocked up the expected behavior of these different functions so I could write
-// The unit tests for them. We can swap out and delete the mocks as soon as we have
-// real Merger operations fleshed out. Some of the helper functions here may also
-// be useful in the real functions.
+// GetConflicts obtains a bundle of conflict OperationOutcomes from the host FHIR server.
+// These conflicts may or may not be resolved.
+func (m *Merger) GetConflicts(conflictURLs []string) (conflicts *models.Bundle, err error) {
+	conflicts = &models.Bundle{}
+	total := uint32(len(conflictURLs))
+	conflicts.Total = &total
+	conflicts.Type = "transaction-response"
+	conflicts.Entry = make([]models.BundleEntryComponent, total)
 
-func mockMerge(source1, source2 string) (mergeID string, outcome *models.Bundle, err error) {
-
-	res, err := http.Get(source1)
-	if err != nil {
-		return "", nil, err
+	for i, url := range conflictURLs {
+		entry := models.BundleEntryComponent{}
+		conflict, err := GetResource("OperationOutcome", url)
+		if err != nil {
+			return nil, err
+		}
+		entry.Resource = conflict
+		conflicts.Entry[i] = entry
 	}
-	defer res.Body.Close()
+	return conflicts, nil
+}
+
+// GetTarget obtains the target bundle used by a merge session.
+func (m *Merger) GetTarget(targetURL string) (target *models.Bundle, err error) {
+	resource, err := GetResource("Bundle", targetURL)
+	if err != nil {
+		return nil, err
+	}
+	target, ok := resource.(*models.Bundle)
+	if !ok {
+		return nil, fmt.Errorf("Target %s was not a valid FHIR bundle", targetURL)
+	}
+	target.Type = "collection"
+	total := uint32(len(target.Entry))
+	target.Total = &total
+	return target, nil
+}
+
+// ========================================================================= //
+// HELPER FUNCTIONS                                                          //
+// ========================================================================= //
+
+// GetResource gets a FHIR resource of a specified type from the fully qualified
+// resourceURL provided.
+func GetResource(resourceType, resourceURL string) (resource interface{}, err error) {
+	// Make the request.
+	res, err := http.Get(resourceURL)
+	if err != nil {
+		return nil, err
+	}
 
 	if res.StatusCode == 404 {
-		err = fmt.Errorf("Resource %s not found", source1)
-		return "", nil, err
+		return nil, fmt.Errorf("Resource %s not found", resourceURL)
 	}
 
-	if strings.Compare(source1, source2) == 0 {
-		// Mocked up for testing. If the 2 resources are the same return that bundle.
-		decoder := json.NewDecoder(res.Body)
-		mergedBundle := &models.Bundle{}
-		err = decoder.Decode(mergedBundle)
-		if err != nil {
-			return "", nil, err
-		}
-		// The mergeID is nil for a successful merge since there is no reason to save state.
-		return "", mergedBundle, nil
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("An unexpected error occured while requesting resource %s", resourceURL)
 	}
 
-	// Mocked up for testing. If the 2 sources are not the same, return a
-	// bundle with mock OperationOutcomes detailing conflicts.
-	return bson.NewObjectId().Hex(), testutil.CreateMockConflictBundle(2), nil
+	// Unmarshal the resource returned.
+	resource = models.NewStructForResourceName(resourceType)
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(body, resource)
+	if err != nil {
+		return nil, err
+	}
+	return resource, nil
 }
 
-func mockResolveConflict(targetBundle, opOutcome string, updatedResource interface{}) (outcome *models.Bundle, err error) {
-
-	switch updatedResource.(type) {
-	case *models.Patient:
-		// This is mocked to be a merge with one conflict. "Resolve"
-		// it and delete the OperationOutcome.
-		err = deleteResource(opOutcome)
-		if err != nil {
-			return nil, err
-		}
-
-		// Get the final merged bundle.
-		res, err := http.Get(targetBundle)
-		if err != nil {
-			return nil, err
-		}
-		defer res.Body.Close()
-
-		decoder := json.NewDecoder(res.Body)
-		mergedBundle := &models.Bundle{}
-		err = decoder.Decode(mergedBundle)
-		if err != nil {
-			return nil, err
-		}
-
-		// Now delete that merged bundle before returning it.
-		err = deleteResource(targetBundle)
-		if err != nil {
-			return nil, err
-		}
-		return mergedBundle, nil
-
-	case *models.Encounter:
-		// This is mocked to be a merge with two conflicts. "Resolve"
-		// one and leave the other.
-		err = deleteResource(opOutcome)
-		if err != nil {
-			return nil, err
-		}
-
-		// Return a dummy bundle with one conflict.
-		return testutil.CreateMockConflictBundle(1), nil
-
-	default:
-		return nil, fmt.Errorf("Unknown resource %v", updatedResource)
-	}
-}
-
-// deleteResource deletes a resource on a FHIR server when provided
-// with the fully qualified URI referencing that resource.
-func deleteResource(resourceURI string) error {
-	req, err := http.NewRequest("DELETE", resourceURI, nil)
+// DeleteResource deletes a resource on a FHIR server when provided with the fully
+// qualified URL referencing that resource.
+func DeleteResource(resourceURL string) error {
+	req, err := http.NewRequest("DELETE", resourceURL, nil)
 	if err != nil {
 		return err
 	}
@@ -154,7 +136,7 @@ func deleteResource(resourceURI string) error {
 	}
 
 	if deleteResp.StatusCode != 204 {
-		return fmt.Errorf("Resource %s was not deleted", resourceURI)
+		return fmt.Errorf("Resource %s was not deleted", resourceURL)
 	}
 	return nil
 }

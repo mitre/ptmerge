@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"time"
 
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/intervention-engine/fhir/models"
 	"github.com/mitre/ptmerge/merge"
+	"github.com/mitre/ptmerge/state"
 )
 
 // MergeController manages the resource handlers for a Merge. MergeController
@@ -33,8 +35,12 @@ func NewMergeController(session *mgo.Session, dbname string, fhirHost string) *M
 	}
 }
 
-// Merges 2 FHIR bundles of patient resources given the URLs to both bundles.
-func (m *MergeController) merge(c *gin.Context) {
+// ========================================================================= //
+// MERGE HANDLERS                                                            //
+// ========================================================================= //
+
+// Merge attempts to merge 2 FHIR bundles of patient resources given the URLs to both bundles.
+func (m *MergeController) Merge(c *gin.Context) {
 	var err error
 	worker := m.session.Copy()
 	defer worker.Close()
@@ -43,39 +49,42 @@ func (m *MergeController) merge(c *gin.Context) {
 	source2 := c.Query("source2")
 
 	if source1 == "" || source2 == "" {
-		c.String(http.StatusBadRequest, "URL(s) referencing bundles to merge were not provided")
+		c.String(http.StatusBadRequest, "URL(s) referencing source bundles were not provided")
 		return
 	}
 
 	merger := merge.NewMerger(m.fhirHost)
-	targetBundle, outcome, err := merger.Merge(source1, source2)
+	outcome, targetURL, err := merger.Merge(source1, source2)
 
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	if targetBundle == "" {
+	if targetURL == "" {
 		// The merge had no conflicts, just return the merged bundle.
 		c.JSON(http.StatusOK, outcome)
 		return
 	}
 
 	// Check outcome to get a list of merge conflicts.
-	conflictMap := make(ConflictMap)
+	conflictMap := make(state.ConflictMap)
 	for _, entry := range outcome.Entry {
 		if entryIsOperationOutcome(entry) {
 			conflictID := getConflictID(entry)
-			conflictMap[conflictID] = m.fhirHost + "/OperationOutcome/" + conflictID
+			conflictMap[conflictID] = &state.ConflictState{
+				URL: m.fhirHost + "/OperationOutcome/" + conflictID,
+			}
 		}
 	}
 
 	// Some conflicts exist, create a new record in mongo to manage this merge's state.
 	mergeID := bson.NewObjectId().Hex()
-	err = worker.DB(m.dbname).C("merges").Insert(&MergeState{
-		MergeID:      mergeID,
-		TargetBundle: targetBundle,
-		Conflicts:    conflictMap,
+	err = worker.DB(m.dbname).C("merges").Insert(&state.MergeState{
+		MergeID:   mergeID,
+		Completed: false,
+		TargetURL: targetURL,
+		Conflicts: conflictMap,
 	})
 
 	if err != nil {
@@ -88,9 +97,9 @@ func (m *MergeController) merge(c *gin.Context) {
 	c.JSON(http.StatusCreated, outcome)
 }
 
-// Resolves a single merge confict given the OperationOutcome ID and the correct resource
-// that resolves the merge.
-func (m *MergeController) resolve(c *gin.Context) {
+// Resolve attempts to resolve a single merge confict given the mergeID, conflictID,
+// and the complete resource that resolve the conflict.
+func (m *MergeController) Resolve(c *gin.Context) {
 	var err error
 	worker := m.session.Copy()
 	defer worker.Close()
@@ -126,8 +135,8 @@ func (m *MergeController) resolve(c *gin.Context) {
 	}
 
 	// Get the merge state from mongo.
-	var state MergeState
-	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&state)
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
 	if err != nil {
 		if err == mgo.ErrNotFound {
 			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
@@ -137,15 +146,33 @@ func (m *MergeController) resolve(c *gin.Context) {
 		return
 	}
 
+	// Check that the merge is incomplete.
+	if mergeState.Completed {
+		c.String(http.StatusBadRequest, "Merge %s is complete, no remaining conflicts to resolve", mergeID)
+		return
+	}
+
 	// Check that the conflictID exists and is part of this merge.
-	conflict, found := state.Conflicts[conflictID]
+	conflict, found := mergeState.Conflicts[conflictID]
 	if !found {
 		c.String(http.StatusNotFound, "Merge conflict %s not found for merge %s", conflictID, mergeID)
 		return
 	}
 
+	// Check that the conflict wasn't already resolved.
+	if conflict.Resolved {
+		c.String(http.StatusBadRequest, "Merge conflict %s was already resolved for merge %s", conflictID, mergeID)
+		return
+	}
+
+	// Check that the conflict wasn't deleted.
+	if conflict.Deleted {
+		c.String(http.StatusBadRequest, "Merge conflict %s was already resolved and deleted for merge %s", conflictID, mergeID)
+		return
+	}
+
 	merger := merge.NewMerger(m.fhirHost)
-	outcome, err := merger.ResolveConflict(state.TargetBundle, conflict, updatedResource)
+	outcome, err := merger.ResolveConflict(mergeState.TargetURL, conflict.URL, updatedResource)
 
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
@@ -157,21 +184,51 @@ func (m *MergeController) resolve(c *gin.Context) {
 	// and the target. The call to Merger.ResolveConflict() already deleted those
 	// resources on the host FHIR server.
 	if !isOperationOutcomeBundle(outcome) {
-		err = worker.DB(m.dbname).C("merges").RemoveId(state.MergeID)
+		// Wipe the OperationOutcomes from the FHIR server
+		var mergeState state.MergeState
+		err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		for id, conflict := range mergeState.Conflicts {
+			if !conflict.Resolved {
+				c.String(http.StatusInternalServerError, fmt.Sprintf("Conflict %s is not resolved, merge is not actually complete", conflict.URL))
+				return
+			}
+			err = merge.DeleteResource(conflict.URL)
+			if err != nil {
+				c.String(http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			// Mark the conflict as "deleted".
+			mergeState.Conflicts[id].Deleted = true
+		}
+
+		// Update the merge to "completed".
+		mergeState.Completed = true
+
+		err = worker.DB(m.dbname).C("merges").Update(
+			bson.M{"_id": mergeID},     // query
+			bson.M{"$set": mergeState}, // update entire object
+		)
+
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
 
-	// The outcome is still a bundle of OperationOutcomes describing the
-	// remaining conflicts. To check that the current conflict was actually
-	// resolved, make sure it's not in this new outcome bundle.
-	if mergeConflictWasResolved(outcome, conflictID) {
-		// Remove that conflictID from the saved state
+	// If the outcome is a bundle of OperationOutcomes describing the
+	// remaining conflicts, update the latest conflict to "resolved".
+	if isOperationOutcomeBundle(outcome) {
+		// Set the conflict to "resolved"
+		key := "conflicts." + conflictID + ".resolved"
 		err = worker.DB(m.dbname).C("merges").Update(
-			bson.M{"_id": mergeID},                                    // query
-			bson.M{"$unset": bson.M{("conflicts." + conflictID): ""}}, // update instruction
+			bson.M{"_id": mergeID},            // query
+			bson.M{"$set": bson.M{key: true}}, // partial update
 		)
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
@@ -182,8 +239,8 @@ func (m *MergeController) resolve(c *gin.Context) {
 	c.JSON(http.StatusOK, outcome)
 }
 
-// Aborts a merge given the merge's ID.
-func (m *MergeController) abort(c *gin.Context) {
+// Abort terminates an in-progress merge given the mergeID.
+func (m *MergeController) Abort(c *gin.Context) {
 	var err error
 	worker := m.session.Copy()
 	defer worker.Close()
@@ -191,11 +248,10 @@ func (m *MergeController) abort(c *gin.Context) {
 	mergeID := c.Param("merge_id")
 
 	// Get the merge state from mongo.
-	var state MergeState
-	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&state)
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
 	if err != nil {
 		if err == mgo.ErrNotFound {
-			fmt.Printf("Got here\n")
 			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
 			return
 		}
@@ -203,46 +259,207 @@ func (m *MergeController) abort(c *gin.Context) {
 		return
 	}
 
-	// Extract an array of resource URIs to delete.
-	uris := make([]string, len(state.Conflicts)+1)
-	uris[0] = state.TargetBundle
-	for i, key := range state.Conflicts.Keys() {
-		uris[i+1] = state.Conflicts[key]
+	var URLs []string
+
+	if mergeState.Completed {
+		// If the merge is complete, just delete it's target.
+		URLs = []string{mergeState.TargetURL}
+	} else {
+		// If a merge is incomplete, delete it's target and all conflicts.
+		URLs = make([]string, len(mergeState.Conflicts)+1)
+		URLs[0] = mergeState.TargetURL
+		for i, key := range mergeState.Conflicts.Keys() {
+			URLs[i+1] = mergeState.Conflicts[key].URL
+		}
 	}
 
 	merger := merge.NewMerger(m.fhirHost)
-	err = merger.Abort(uris)
+	err = merger.Abort(URLs)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Now wipe the saved merge state.
+	err = worker.DB(m.dbname).C("merges").RemoveId(mergeID)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// All other Gin response handlers try to add a response body.
-	// 204 responses explicity do not have response body.
+	// 204 responses explicity do not have a response body.
 	c.AbortWithStatus(204)
 }
 
-// Returns all unresolved merge conflicts for a given merge ID.
-func (m *MergeController) getConflicts(c *gin.Context) {
-	mergeID := c.Param("merge_id")
-	c.String(http.StatusOK, "Merge conflicts for merge %s", mergeID)
-}
+// ========================================================================= //
+// CONVENIENCE HANDLERS                                                      //
+// ========================================================================= //
 
-func mergeConflictWasResolved(ooBundle *models.Bundle, conflictID string) bool {
-	if !isOperationOutcomeBundle(ooBundle) {
-		return false
+// AllMerges returns the metadata for all merges we have a record of.
+func (m *MergeController) AllMerges(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	// Get all merges from mongo.
+	var merges []state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(nil).All(&merges)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
 	}
 
-	resolved := true
-	for _, entry := range ooBundle.Entry {
-		if entryIsOperationOutcome(entry) {
-			if getConflictID(entry) == conflictID {
-				resolved = false
-			}
+	// Package up the merges metadata.
+	meta := &state.Merges{
+		Timestamp: time.Now(),
+		Merges:    merges,
+	}
+
+	c.JSON(http.StatusOK, meta)
+}
+
+// GetMerge returns the metadata for a single merge.
+func (m *MergeController) GetMerge(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	mergeID := c.Param("merge_id")
+
+	// Get the merge state from mongo.
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Package up the merge metadata.
+	meta := &state.Merge{
+		Timestamp: time.Now(),
+		Merge:     mergeState,
+	}
+
+	c.JSON(http.StatusOK, meta)
+}
+
+// GetRemainingConflicts returns all unresolved merge conflicts for a given mergeID.
+func (m *MergeController) GetRemainingConflicts(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	mergeID := c.Param("merge_id")
+
+	// Get the merge state from mongo.
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Extract the URLs to all unresolved conflicts.
+	conflictURLs := []string{}
+	for _, key := range mergeState.Conflicts.Keys() {
+		if !mergeState.Conflicts[key].Resolved && !mergeState.Conflicts[key].Deleted {
+			conflictURLs = append(conflictURLs, mergeState.Conflicts[key].URL)
 		}
 	}
-	return resolved
+
+	// Get a bundle of OperationOutcome conflicts from the host FHIR server.
+	merger := merge.NewMerger(m.fhirHost)
+	conflicts, err := merger.GetConflicts(conflictURLs)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, conflicts)
 }
+
+// GetResolvedConflicts returns all resolved merge conflicts for a given mergeID.
+func (m *MergeController) GetResolvedConflicts(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	mergeID := c.Param("merge_id")
+
+	// Get the merge state from mongo.
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Extract the URLs to all resolved conflicts.
+	resolvedURLs := []string{}
+	for _, key := range mergeState.Conflicts.Keys() {
+		if mergeState.Conflicts[key].Resolved && !mergeState.Conflicts[key].Deleted {
+			resolvedURLs = append(resolvedURLs, mergeState.Conflicts[key].URL)
+		}
+	}
+
+	// Get a bundle of OperationOutcome conflicts from the host FHIR server.
+	merger := merge.NewMerger(m.fhirHost)
+	conflicts, err := merger.GetConflicts(resolvedURLs)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, conflicts)
+}
+
+// GetTarget returns the (partially complete) merge target given a mergeID.
+func (m *MergeController) GetTarget(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	mergeID := c.Param("merge_id")
+
+	// Get the merge state from mongo.
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Get the target from the host FHIR server.
+	merger := merge.NewMerger(m.fhirHost)
+	targetBundle, err := merger.GetTarget(mergeState.TargetURL)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, targetBundle)
+}
+
+// ========================================================================= //
+// HELPER FUNCTIONS                                                          //
+// ========================================================================= //
 
 func isOperationOutcomeBundle(bundle *models.Bundle) bool {
 	for _, entry := range bundle.Entry {
