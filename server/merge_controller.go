@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"time"
@@ -71,9 +72,8 @@ func (m *MergeController) Merge(c *gin.Context) {
 	for _, entry := range outcome.Entry {
 		if entryIsOperationOutcome(entry) {
 			conflictID := getConflictID(entry)
-			conflictMap[conflictID] = state.ConflictState{
-				URL:      m.fhirHost + "/OperationOutcome/" + conflictID,
-				Resolved: false,
+			conflictMap[conflictID] = &state.ConflictState{
+				URL: m.fhirHost + "/OperationOutcome/" + conflictID,
 			}
 		}
 	}
@@ -165,6 +165,12 @@ func (m *MergeController) Resolve(c *gin.Context) {
 		return
 	}
 
+	// Check that the conflict wasn't deleted.
+	if conflict.Deleted {
+		c.String(http.StatusBadRequest, "Merge conflict %s was already resolved and deleted for merge %s", conflictID, mergeID)
+		return
+	}
+
 	merger := merge.NewMerger(m.fhirHost)
 	outcome, err := merger.ResolveConflict(mergeState.TargetURL, conflict.URL, updatedResource)
 
@@ -178,17 +184,41 @@ func (m *MergeController) Resolve(c *gin.Context) {
 	// and the target. The call to Merger.ResolveConflict() already deleted those
 	// resources on the host FHIR server.
 	if !isOperationOutcomeBundle(outcome) {
+		// Wipe the OperationOutcomes from the FHIR server
+		var mergeState state.MergeState
+		err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		for id, conflict := range mergeState.Conflicts {
+			if !conflict.Resolved {
+				c.String(http.StatusInternalServerError, fmt.Sprintf("Conflict %s is not resolved, merge is not actually complete", conflict.URL))
+				return
+			}
+			err = merge.DeleteResource(conflict.URL)
+			if err != nil {
+				c.String(http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			// Mark the conflict as "deleted".
+			mergeState.Conflicts[id].Deleted = true
+		}
+
+		// Update the merge to "completed".
+		mergeState.Completed = true
+
 		err = worker.DB(m.dbname).C("merges").Update(
-			bson.M{"_id": mergeID},                    // query
-			bson.M{"$set": bson.M{"completed": true}}, // update instruction
+			bson.M{"_id": mergeID},     // query
+			bson.M{"$set": mergeState}, // update entire object
 		)
 
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
 			return
 		}
-
-		// TODO: Wipe the OperationOutcomes from the FHIR server?
 	}
 
 	// If the outcome is a bundle of OperationOutcomes describing the
@@ -198,7 +228,7 @@ func (m *MergeController) Resolve(c *gin.Context) {
 		key := "conflicts." + conflictID + ".resolved"
 		err = worker.DB(m.dbname).C("merges").Update(
 			bson.M{"_id": mergeID},            // query
-			bson.M{"$set": bson.M{key: true}}, // update instruction
+			bson.M{"$set": bson.M{key: true}}, // partial update
 		)
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
@@ -243,8 +273,15 @@ func (m *MergeController) Abort(c *gin.Context) {
 		return
 	}
 
+	// Now wipe the saved merge state.
+	err = worker.DB(m.dbname).C("merges").RemoveId(mergeID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	// All other Gin response handlers try to add a response body.
-	// 204 responses explicity do not have response body.
+	// 204 responses explicity do not have a response body.
 	c.AbortWithStatus(204)
 }
 
@@ -327,7 +364,7 @@ func (m *MergeController) GetRemainingConflicts(c *gin.Context) {
 	// Extract the URLs to all unresolved conflicts.
 	conflictURLs := []string{}
 	for _, key := range mergeState.Conflicts.Keys() {
-		if !mergeState.Conflicts[key].Resolved {
+		if !mergeState.Conflicts[key].Resolved && !mergeState.Conflicts[key].Deleted {
 			conflictURLs = append(conflictURLs, mergeState.Conflicts[key].URL)
 		}
 	}
@@ -366,7 +403,7 @@ func (m *MergeController) GetResolvedConflicts(c *gin.Context) {
 	// Extract the URLs to all resolved conflicts.
 	resolvedURLs := []string{}
 	for _, key := range mergeState.Conflicts.Keys() {
-		if mergeState.Conflicts[key].Resolved {
+		if mergeState.Conflicts[key].Resolved && !mergeState.Conflicts[key].Deleted {
 			resolvedURLs = append(resolvedURLs, mergeState.Conflicts[key].URL)
 		}
 	}

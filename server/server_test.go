@@ -114,11 +114,11 @@ func (s *ServerTestSuite) TestResolveConflictMergeNotFound() {
 	cid1 := bson.NewObjectId().Hex()
 	cid2 := bson.NewObjectId().Hex()
 	conflicts := state.ConflictMap{
-		cid1: state.ConflictState{
+		cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
 			Resolved: false,
 		},
-		cid2: state.ConflictState{
+		cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
 			Resolved: false,
 		},
@@ -165,11 +165,11 @@ func (s *ServerTestSuite) TestResolveConflictConflictNotFound() {
 	cid1 := bson.NewObjectId().Hex()
 	cid2 := bson.NewObjectId().Hex()
 	conflicts := state.ConflictMap{
-		cid1: state.ConflictState{
+		cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
 			Resolved: false,
 		},
-		cid2: state.ConflictState{
+		cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
 			Resolved: false,
 		},
@@ -207,9 +207,108 @@ func (s *ServerTestSuite) TestResolveConflictConflictNotFound() {
 	s.Equal(fmt.Sprintf("Merge conflict %s not found for merge %s", conflictID, mergeID), string(body))
 }
 
-// // ========================================================================= //
-// // TEST ABORT MERGE                                                          //
-// // ========================================================================= //
+func (s *ServerTestSuite) TestResolveConflictConflictAlreadyResolved() {
+	var err error
+
+	// Insert some merges so there's something to query against.
+	cid1 := bson.NewObjectId().Hex()
+	cid2 := bson.NewObjectId().Hex()
+	conflicts := state.ConflictMap{
+		cid1: &state.ConflictState{
+			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+			Resolved: false,
+		},
+		cid2: &state.ConflictState{
+			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+			Resolved: true,
+		},
+	}
+	targetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
+	_, err = s.insertMergeState(targetURL, conflicts)
+	s.NoError(err)
+
+	targetURL = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
+	mergeID, err := s.insertMergeState(targetURL, conflicts)
+	s.NoError(err)
+
+	resource := []byte(
+		`{
+			"resourceType": "Patient",
+			"name": [{
+				"family": ["Abbott"],
+				"given": ["Clint"]
+			}],
+			"gender": "male",
+			"birthDate": "1950-09-02"
+		}`)
+
+	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolve/" + cid2
+	res, err := http.Post(req, "application/json", bytes.NewBuffer(resource))
+	s.NoError(err)
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+
+	s.Equal(http.StatusBadRequest, res.StatusCode)
+	s.Equal(fmt.Sprintf("Merge conflict %s was already resolved for merge %s", cid2, mergeID), string(body))
+}
+
+func (s *ServerTestSuite) TestResolveConflictConflictAlreadyDeleted() {
+	var err error
+
+	// In practice this scenario should never happen (a conflict should never be deleted before it
+	// is resolved). However, this is still worth checking for.
+
+	// Insert some merges so there's something to query against.
+	cid1 := bson.NewObjectId().Hex()
+	cid2 := bson.NewObjectId().Hex()
+	conflicts := state.ConflictMap{
+		cid1: &state.ConflictState{
+			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+			Resolved: true,
+			Deleted:  true,
+		},
+		cid2: &state.ConflictState{
+			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+			Resolved: false,
+			Deleted:  true,
+		},
+	}
+	targetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
+	_, err = s.insertMergeState(targetURL, conflicts)
+	s.NoError(err)
+
+	targetURL = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
+	mergeID, err := s.insertMergeState(targetURL, conflicts)
+	s.NoError(err)
+
+	resource := []byte(
+		`{
+			"resourceType": "Patient",
+			"name": [{
+				"family": ["Abbott"],
+				"given": ["Clint"]
+			}],
+			"gender": "male",
+			"birthDate": "1950-09-02"
+		}`)
+
+	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolve/" + cid2
+	res, err := http.Post(req, "application/json", bytes.NewBuffer(resource))
+	s.NoError(err)
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+
+	s.Equal(http.StatusBadRequest, res.StatusCode)
+	s.Equal(fmt.Sprintf("Merge conflict %s was already resolved and deleted for merge %s", cid2, mergeID), string(body))
+}
+
+// ========================================================================= //
+// TEST ABORT MERGE                                                          //
+// ========================================================================= //
 
 func (s *ServerTestSuite) TestAbortMerge() {
 	// Put a target bundle and a conflict on the host FHIR server.
@@ -222,7 +321,7 @@ func (s *ServerTestSuite) TestAbortMerge() {
 	// Put the merge state in mongo.
 	conflicts := make(state.ConflictMap)
 	conflictID := conflict.Resource.Id
-	conflicts[conflictID] = state.ConflictState{
+	conflicts[conflictID] = &state.ConflictState{
 		URL:      s.FHIRServer.URL + "/OperationOutcome/" + conflictID,
 		Resolved: false,
 	}
@@ -245,11 +344,11 @@ func (s *ServerTestSuite) TestAbortMergeMergeNotFound() {
 	cid1 := bson.NewObjectId().Hex()
 	cid2 := bson.NewObjectId().Hex()
 	conflicts := state.ConflictMap{
-		cid1: state.ConflictState{
+		cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
 			Resolved: false,
 		},
-		cid2: state.ConflictState{
+		cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
 			Resolved: false,
 		},
@@ -289,11 +388,11 @@ func (s *ServerTestSuite) TestAllMerges() {
 	m1targetID := bson.NewObjectId().Hex()
 
 	conflicts := state.ConflictMap{
-		m1cid1: state.ConflictState{
+		m1cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
 			Resolved: false,
 		},
-		m1cid2: state.ConflictState{
+		m1cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
 			Resolved: false,
 		},
@@ -308,17 +407,42 @@ func (s *ServerTestSuite) TestAllMerges() {
 	m2targetID := bson.NewObjectId().Hex()
 
 	conflicts = state.ConflictMap{
-		m2cid1: state.ConflictState{
+		m2cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m2cid1,
 			Resolved: false,
 		},
-		m2cid2: state.ConflictState{
+		m2cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m2cid2,
 			Resolved: true,
 		},
 	}
 	m2TargetURL := s.FHIRServer.URL + "/Bundle/" + m2targetID
 	m2mergeID, err := s.insertMergeState(m2TargetURL, conflicts)
+	s.NoError(err)
+
+	// Merge 3 metadata.
+	m3cid1 := bson.NewObjectId().Hex()
+	m3cid2 := bson.NewObjectId().Hex()
+	m3targetID := bson.NewObjectId().Hex()
+
+	conflicts = state.ConflictMap{
+		m3cid1: &state.ConflictState{
+			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m3cid1,
+			Resolved: true,
+			Deleted:  true,
+		},
+		m3cid2: &state.ConflictState{
+			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m3cid2,
+			Resolved: true,
+			Deleted:  true,
+		},
+	}
+	m3TargetURL := s.FHIRServer.URL + "/Bundle/" + m3targetID
+	m3mergeID, err := s.insertMergeState(m3TargetURL, conflicts)
+	err = s.DB().C("merges").Update(
+		bson.M{"_id": m3mergeID},
+		bson.M{"$set": bson.M{"completed": true}},
+	)
 	s.NoError(err)
 
 	// Make the request.
@@ -336,11 +460,12 @@ func (s *ServerTestSuite) TestAllMerges() {
 	s.NoError(err)
 
 	s.NotEmpty(metadata.Timestamp)
-	s.Len(metadata.Merges, 2)
+	s.Len(metadata.Merges, 3)
 
 	// Validate the first merge.
 	merge1 := metadata.Merges[0]
 	s.Equal(m1mergeID, merge1.MergeID)
+	s.False(merge1.Completed)
 	s.Equal(m1TargetURL, merge1.TargetURL)
 	s.Len(merge1.Conflicts, 2)
 
@@ -349,12 +474,26 @@ func (s *ServerTestSuite) TestAllMerges() {
 	s.True(ok)
 	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+m1cid1, conflict.URL)
 	s.False(conflict.Resolved)
+	s.False(conflict.Deleted)
 
 	// Validate the second merge.
 	merge2 := metadata.Merges[1]
 	s.Equal(m2mergeID, merge2.MergeID)
+	s.False(merge2.Completed)
 	s.Equal(m2TargetURL, merge2.TargetURL)
 	s.Len(merge2.Conflicts, 2)
+
+	// Validate the third merge.
+	merge3 := metadata.Merges[2]
+	s.Equal(m3mergeID, merge3.MergeID)
+	s.True(merge3.Completed)
+	s.Len(merge3.Conflicts, 2)
+
+	s.True(merge3.Conflicts[m3cid1].Resolved)
+	s.True(merge3.Conflicts[m3cid1].Deleted)
+
+	s.True(merge3.Conflicts[m3cid2].Resolved)
+	s.True(merge3.Conflicts[m3cid2].Deleted)
 }
 
 func (s *ServerTestSuite) TestAllMergesNoMerges() {
@@ -389,11 +528,11 @@ func (s *ServerTestSuite) TestGetMerge() {
 	m1targetID := bson.NewObjectId().Hex()
 
 	conflicts := state.ConflictMap{
-		m1cid1: state.ConflictState{
+		m1cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
 			Resolved: false,
 		},
-		m1cid2: state.ConflictState{
+		m1cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
 			Resolved: true,
 		},
@@ -462,11 +601,11 @@ func (s *ServerTestSuite) TestGetRemainingConflicts() {
 	m1cid2 := conflict2.Resource.Id
 
 	conflicts := state.ConflictMap{
-		m1cid1: state.ConflictState{
+		m1cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
 			Resolved: false,
 		},
-		m1cid2: state.ConflictState{
+		m1cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
 			Resolved: true, // This conflict is resolved
 		},
@@ -515,11 +654,11 @@ func (s *ServerTestSuite) TestGetRemainingConflictsNoneRemaining() {
 	m1cid2 := conflict2.Resource.Id
 
 	conflicts := state.ConflictMap{
-		m1cid1: state.ConflictState{
+		m1cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
 			Resolved: true,
 		},
-		m1cid2: state.ConflictState{
+		m1cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
 			Resolved: true,
 		},
@@ -553,11 +692,11 @@ func (s *ServerTestSuite) TestGetRemainingConflictsConflictNotFound() {
 	m1cid2 := bson.NewObjectId().Hex()
 
 	conflicts := state.ConflictMap{
-		m1cid1: state.ConflictState{
+		m1cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
 			Resolved: false,
 		},
-		m1cid2: state.ConflictState{
+		m1cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
 			Resolved: true,
 		},
@@ -616,11 +755,11 @@ func (s *ServerTestSuite) TestGetResolvedConflicts() {
 	m1cid2 := conflict2.Resource.Id
 
 	conflicts := state.ConflictMap{
-		m1cid1: state.ConflictState{
+		m1cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
 			Resolved: false,
 		},
-		m1cid2: state.ConflictState{
+		m1cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
 			Resolved: true, // This conflict is resolved
 		},
@@ -669,11 +808,11 @@ func (s *ServerTestSuite) TestGetResolvedConflictsNoneFound() {
 	m1cid2 := conflict2.Resource.Id
 
 	conflicts := state.ConflictMap{
-		m1cid1: state.ConflictState{
+		m1cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
 			Resolved: false,
 		},
-		m1cid2: state.ConflictState{
+		m1cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
 			Resolved: false,
 		},
@@ -707,11 +846,11 @@ func (s *ServerTestSuite) TestGetResolvedConflictsConflictsNotFound() {
 	m1cid2 := bson.NewObjectId().Hex()
 
 	conflicts := state.ConflictMap{
-		m1cid1: state.ConflictState{
+		m1cid1: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
 			Resolved: true,
 		},
-		m1cid2: state.ConflictState{
+		m1cid2: &state.ConflictState{
 			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
 			Resolved: false,
 		},

@@ -43,7 +43,7 @@ func (m *Merger) ResolveConflict(targetURL, opOutcomeURL string, updatedResource
 // Abort aborts a merge in progress by deleting all resources related to the merge.
 func (m *Merger) Abort(resourceURLs []string) (err error) {
 	for _, url := range resourceURLs {
-		err = deleteResource(url)
+		err = DeleteResource(url)
 		if err != nil {
 			return err
 		}
@@ -62,7 +62,7 @@ func (m *Merger) GetConflicts(conflictURLs []string) (conflicts *models.Bundle, 
 
 	for i, url := range conflictURLs {
 		entry := models.BundleEntryComponent{}
-		conflict, err := getResource("OperationOutcome", url)
+		conflict, err := GetResource("OperationOutcome", url)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +74,7 @@ func (m *Merger) GetConflicts(conflictURLs []string) (conflicts *models.Bundle, 
 
 // GetTarget obtains the target bundle used by a merge session.
 func (m *Merger) GetTarget(targetURL string) (target *models.Bundle, err error) {
-	resource, err := getResource("Bundle", targetURL)
+	resource, err := GetResource("Bundle", targetURL)
 	if err != nil {
 		return nil, err
 	}
@@ -92,9 +92,9 @@ func (m *Merger) GetTarget(targetURL string) (target *models.Bundle, err error) 
 // HELPER FUNCTIONS                                                          //
 // ========================================================================= //
 
-// getResource gets a FHIR resource of a specified type from the fully qualified
+// GetResource gets a FHIR resource of a specified type from the fully qualified
 // resourceURL provided.
-func getResource(resourceType, resourceURL string) (resource interface{}, err error) {
+func GetResource(resourceType, resourceURL string) (resource interface{}, err error) {
 	// Make the request.
 	res, err := http.Get(resourceURL)
 	if err != nil {
@@ -122,9 +122,9 @@ func getResource(resourceType, resourceURL string) (resource interface{}, err er
 	return resource, nil
 }
 
-// deleteResource deletes a resource on a FHIR server when provided with the fully
+// DeleteResource deletes a resource on a FHIR server when provided with the fully
 // qualified URL referencing that resource.
-func deleteResource(resourceURL string) error {
+func DeleteResource(resourceURL string) error {
 	req, err := http.NewRequest("DELETE", resourceURL, nil)
 	if err != nil {
 		return err

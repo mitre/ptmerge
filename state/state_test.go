@@ -17,15 +17,15 @@ func TestStateTestSuite(t *testing.T) {
 
 func (m *StateTestSuite) TestConflictKeys() {
 	conflicts := make(ConflictMap)
-	conflicts["foo"] = ConflictState{
+	conflicts["foo"] = &ConflictState{
 		URL:      "foo",
 		Resolved: true,
 	}
-	conflicts["bar"] = ConflictState{
+	conflicts["bar"] = &ConflictState{
 		URL:      "bar",
 		Resolved: true,
 	}
-	conflicts["hey"] = ConflictState{
+	conflicts["hey"] = &ConflictState{
 		URL:      "hey",
 		Resolved: true,
 	}

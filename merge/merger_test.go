@@ -85,7 +85,7 @@ func (m *MergerTestSuite) TestGetOperationOutcome() {
 	m.NoError(err)
 
 	uri := m.FHIRServer.URL + "/OperationOutcome/" + oo.Resource.Id
-	resource, err := getResource("OperationOutcome", uri)
+	resource, err := GetResource("OperationOutcome", uri)
 	m.NoError(err)
 
 	// Check that the resource returned is what we expect.
@@ -100,7 +100,7 @@ func (m *MergerTestSuite) TestGetBundleResource() {
 	m.NoError(err)
 
 	uri := m.FHIRServer.URL + "/Bundle/" + bundle.Resource.Id
-	resource, err := getResource("Bundle", uri)
+	resource, err := GetResource("Bundle", uri)
 	m.NoError(err)
 
 	// Check that the resource returned is what we expect.
@@ -113,7 +113,7 @@ func (m *MergerTestSuite) TestGetResourceNotFound() {
 	// Attempting to get a resource that doesn't exist should throw an error.
 	resourceID := bson.NewObjectId().Hex()
 	uri := m.FHIRServer.URL + "/Patient/" + resourceID
-	_, err := getResource("Patient", uri)
+	_, err := GetResource("Patient", uri)
 	m.Error(err)
 	m.Equal(fmt.Sprintf("Resource %s not found", uri), err.Error())
 }
@@ -123,7 +123,7 @@ func (m *MergerTestSuite) TestGetResourceMismatchedType() {
 	m.NoError(err)
 
 	uri := m.FHIRServer.URL + "/Bundle/" + bundle.Resource.Id
-	_, err = getResource("Patient", uri) // Patient type does not match the resource
+	_, err = GetResource("Patient", uri) // Patient type does not match the resource
 	m.Error(err)
 	m.Equal("Expected resourceType to be Patient, instead received Bundle", err.Error())
 }
@@ -134,7 +134,7 @@ func (m *MergerTestSuite) TestDeleteOperationOutcomeResource() {
 	m.NoError(err)
 
 	uri := m.FHIRServer.URL + "/OperationOutcome/" + oo.Resource.Id
-	err = deleteResource(uri)
+	err = DeleteResource(uri)
 	m.NoError(err)
 
 	// Attempt to get the resource to confirm it's deleted.
@@ -149,7 +149,7 @@ func (m *MergerTestSuite) TestDeleteBundleResource() {
 	m.NoError(err)
 
 	uri := m.FHIRServer.URL + "/Bundle/" + bundle.Resource.Id
-	err = deleteResource(uri)
+	err = DeleteResource(uri)
 	m.NoError(err)
 
 	// Attempt to get the resource to confirm it's deleted.
@@ -162,6 +162,6 @@ func (m *MergerTestSuite) TestDeleteResourceNotFound() {
 	// Attempting to delete a resource that already doesn't exist will not throw an error.
 	resourceID := bson.NewObjectId().Hex()
 	uri := m.FHIRServer.URL + "/Patient/" + resourceID
-	err := deleteResource(uri)
+	err := DeleteResource(uri)
 	m.NoError(err)
 }

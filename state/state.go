@@ -28,11 +28,12 @@ type MergeState struct {
 type ConflictState struct {
 	URL      string `bson:"url,omitempty" json:"url,omitempty"`
 	Resolved bool   `bson:"resolved" json:"resolved"`
+	Deleted  bool   `bson:"deleted" json:"deleted"`
 }
 
 // ConflictMap is a map containing one or more ConflictStates. The key to each
 // ConflictState is that conflict's ID.
-type ConflictMap map[string]ConflictState
+type ConflictMap map[string]*ConflictState
 
 // Keys returns all keys (conflict IDs) in the map.
 func (c ConflictMap) Keys() []string {
