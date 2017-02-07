@@ -26,7 +26,7 @@ type MergeState struct {
 // store in mongo. This is embedded in the MergeState object as a ConflictMap.
 type ConflictState struct {
 	URL      string `bson:"url,omitempty" json:"url,omitempty"`
-	Resolved bool   `bson:"resolved,omitempty" json:"resolved,omitempty"`
+	Resolved bool   `bson:"resolved" json:"resolved"`
 }
 
 // ConflictMap is a map containing one or more ConflictStates. The key to each
