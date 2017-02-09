@@ -139,7 +139,7 @@ func (s *ServerTestSuite) TestResolveConflictMergeNotFound() {
 		`{
 			"resourceType": "Patient",
 			"name": [{
-				"family": ["Abbott"],
+				"family": "Abbott",
 				"given": ["Clint"]
 			}],
 			"gender": "male",
@@ -188,7 +188,7 @@ func (s *ServerTestSuite) TestResolveConflictConflictNotFound() {
 		`{
 			"resourceType": "Patient",
 			"name": [{
-				"family": ["Abbott"],
+				"family": "Abbott",
 				"given": ["Clint"]
 			}],
 			"gender": "male",
@@ -235,7 +235,7 @@ func (s *ServerTestSuite) TestResolveConflictConflictAlreadyResolved() {
 		`{
 			"resourceType": "Patient",
 			"name": [{
-				"family": ["Abbott"],
+				"family": "Abbott",
 				"given": ["Clint"]
 			}],
 			"gender": "male",
@@ -287,7 +287,7 @@ func (s *ServerTestSuite) TestResolveConflictConflictAlreadyDeleted() {
 		`{
 			"resourceType": "Patient",
 			"name": [{
-				"family": ["Abbott"],
+				"family": "Abbott",
 				"given": ["Clint"]
 			}],
 			"gender": "male",

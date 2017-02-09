@@ -3,7 +3,7 @@ import:
 - package: github.com/gin-gonic/gin
 - package: github.com/intervention-engine/fhir
   vcs: git
-  version: stu3_aug2016
+  version: stu3_jan2017
   repo: https://github.com/intervention-engine/fhir.git
   subpackages:
   - models
