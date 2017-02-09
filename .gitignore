@@ -28,3 +28,4 @@ ptmerge
 
 # Glide dependency management
 vendor/**
+*.idea/
