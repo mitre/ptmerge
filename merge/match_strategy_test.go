@@ -32,3 +32,12 @@ func (m *MatchTestSuite) TestMatch() {
 	m.True(result)
 	m.Nil(err)
 }
+
+func (m *MatchTestSuite) TestPartialMatch() {
+	matcher := new(PatientMatchStrategy)
+	source1 := testutil.CreateMockPatientObject("../fixtures/patients/bernard_johnston_patient.json")
+	source2 := testutil.CreateMockPatientObject("../fixtures/patients/bernard_johnson_patient.json")
+	result, err := matcher.Match(source1, source2)
+	m.False(result)
+	m.Nil(err)
+}
