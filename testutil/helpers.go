@@ -3,6 +3,7 @@ package testutil
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 
@@ -77,6 +78,20 @@ func PostFixture(fhirHost, resourceName, fixturePath string) (res *http.Response
 		return nil, err
 	}
 	return res, nil
+}
+
+// LoadFixture returns a resource-appropriate struct for the unmarshaled fixture.
+func LoadFixture(resourceName, fixturePath string) (resource interface{}, err error) {
+	data, err := ioutil.ReadFile(fixturePath)
+	resourceStruct := models.NewStructForResourceName(resourceName)
+	if resourceStruct == nil {
+		return nil, fmt.Errorf("Unknown resource type '%s'", resourceName)
+	}
+	err = json.Unmarshal(data, &resourceStruct)
+	if err != nil {
+		return nil, err
+	}
+	return resourceStruct, nil
 }
 
 // CreateMockConflictBundle creates a sample Bundle with n OperationOutcomes
