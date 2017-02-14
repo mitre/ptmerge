@@ -150,3 +150,21 @@ func CreateMockPatientObject(jsonFilePath string) *models.Patient {
 	return patient
 
 }
+
+func CreateMockEncounterObject(jsonFilePath string) *models.Encounter {
+
+	encounter := new(models.Encounter)
+	reader, err := ioutil.ReadFile(jsonFilePath)
+	if err != nil {
+		panic("Could not read encounter json from fixture")
+	}
+
+	err = json.Unmarshal(reader, &encounter)
+
+	if err != nil {
+		panic("Could not unmarshal json from file")
+	}
+
+	return encounter
+
+}

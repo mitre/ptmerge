@@ -41,3 +41,12 @@ func (m *MatchTestSuite) TestPartialMatch() {
 	m.False(result)
 	m.Nil(err)
 }
+
+func (m *MatchTestSuite) TestWrongResourceType() {
+	matcher := new(PatientMatchStrategy)
+	source1 := testutil.CreateMockEncounterObject("../fixtures/encounters/encounter1.json")
+	source2 := testutil.CreateMockEncounterObject("../fixtures/encounters/encounter1.json")
+	result, err := matcher.Match(source1, source2)
+	m.False(result)
+	m.Error(err)
+}

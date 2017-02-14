@@ -12,6 +12,9 @@ type PatientMatchStrategy struct{}
 func (p *PatientMatchStrategy) Match(left interface{}, right interface{}) (isMatch bool, err error) {
 
 	leftResource, ok := left.(*models.Patient)
+	if !ok {
+		fmt.Println("Incorrect format for Patient resource")
+	}
 	rightResource, ok := right.(*models.Patient)
 	if !ok {
 		fmt.Println("Incorrect format for Patient resource")
