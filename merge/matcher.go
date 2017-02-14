@@ -124,7 +124,6 @@ func (m *Matcher) matchWithoutReplacement(left, right []interface{}, strategy Ma
 					Left:  leftResource,
 					Right: rightResource,
 				})
-				fmt.Println("new match: ", matches[len(matches)-1])
 				break
 			}
 
