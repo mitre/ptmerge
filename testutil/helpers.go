@@ -8,6 +8,8 @@ import (
 
 	"gopkg.in/mgo.v2/bson"
 
+	"io/ioutil"
+
 	"github.com/intervention-engine/fhir/models"
 )
 
@@ -129,4 +131,40 @@ func createOpOutcome(severity, code, detailsCode, detailsDisplay string) *models
 	}
 
 	return outcome
+}
+
+func CreateMockPatientObject(jsonFilePath string) *models.Patient {
+
+	patient := new(models.Patient)
+	reader, err := ioutil.ReadFile(jsonFilePath)
+	if err != nil {
+		panic("Could not read patient json from fixture")
+	}
+
+	err = json.Unmarshal(reader, &patient)
+
+	if err != nil {
+		panic("Could not unmarshal json from file")
+	}
+
+	return patient
+
+}
+
+func CreateMockEncounterObject(jsonFilePath string) *models.Encounter {
+
+	encounter := new(models.Encounter)
+	reader, err := ioutil.ReadFile(jsonFilePath)
+	if err != nil {
+		panic("Could not read encounter json from fixture")
+	}
+
+	err = json.Unmarshal(reader, &encounter)
+
+	if err != nil {
+		panic("Could not unmarshal json from file")
+	}
+
+	return encounter
+
 }
