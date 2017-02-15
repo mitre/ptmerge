@@ -23,8 +23,12 @@ _testmain.go
 *.test
 *.prof
 
+
 # PTMerge binary
 ptmerge
 
 # Glide dependency management
 vendor/**
+
+# IDE Metadata
+**.idea/**
