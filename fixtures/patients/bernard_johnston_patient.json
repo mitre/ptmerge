@@ -81,9 +81,9 @@
   "name": [
     {
       "use": "official",
-      "family": [
+      "family": 
         "Johnston34"
-      ],
+      ,
       "given": [
         "Bernard490"
       ],
@@ -99,7 +99,7 @@
       "use": "home"
     }
   ],
-  "gender": "female",
+  "gender": "male",
   "birthDate": "1936-08-09",
   "deceasedDateTime": "1997-04-06T02:33:53-04:00",
   "address": [

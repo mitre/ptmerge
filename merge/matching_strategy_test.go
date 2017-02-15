@@ -24,7 +24,7 @@ func (m *MatchingTestSuite) TestPatientMatchingNoMatch() {
 	strategy := new(PatientMatchingStrategy)
 	result, err := strategy.Match(source1, source2)
 	m.NoError(err)
-	m.True(result)
+	m.False(result)
 }
 
 func (m *MatchingTestSuite) TestPatientMatchingMatch() {
@@ -39,7 +39,7 @@ func (m *MatchingTestSuite) TestPatientMatchingMatch() {
 	m.True(result)
 }
 
-func (m *MatchingTestSuite) TestPatientMatchingPartialMatch() {
+func (m *MatchingTestSuite) TestPatientMatchingPassingPartialMatch() {
 	source1, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnston_patient.json")
 	m.NoError(err)
 	source2, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnson_patient.json")
@@ -49,6 +49,18 @@ func (m *MatchingTestSuite) TestPatientMatchingPartialMatch() {
 	result, err := strategy.Match(source1, source2)
 	m.NoError(err)
 	m.True(result)
+}
+
+func (m *MatchingTestSuite) TestPatientMatchingFailingPartialMatch() {
+	source1, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnston_patient.json")
+	m.NoError(err)
+	source2, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
+	m.NoError(err)
+
+	strategy := new(PatientMatchingStrategy)
+	result, err := strategy.Match(source1, source2)
+	m.NoError(err)
+	m.False(result)
 }
 
 func (m *MatchingTestSuite) TestPatientMatchingWrongResourceType() {
