@@ -1,4 +1,4 @@
-# ptmerge [![Build Status](https://travis-ci.org/mitre/ptmerge.svg)](https://travis-ci.org/mitre/ptmerge)
+# ptmerge [![Build Status](https://travis-ci.org/mitre/ptmerge.svg?branch=master)](https://travis-ci.org/mitre/ptmerge)
 A service for merging two FHIR based patient records.
 
 ## Environment
