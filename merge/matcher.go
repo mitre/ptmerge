@@ -121,8 +121,9 @@ func (m *Matcher) matchWithoutReplacement(left, right []interface{}, strategy Ma
 
 			if matchFound {
 				matches = append(matches, Match{
-					Left:  leftResource,
-					Right: rightResource,
+					ResourceType: strategy.SupportedResourceType(),
+					Left:         leftResource,
+					Right:        rightResource,
 				})
 				break
 			}

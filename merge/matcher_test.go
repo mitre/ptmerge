@@ -126,7 +126,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightNoneRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 1)
-	m.Equal(Match{Left: leftResources[0], Right: rightResources[0]}, matches[0])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[0], Right: rightResources[0]}, matches[0])
 
 	m.Len(unmatchables, 0)
 }
@@ -164,7 +164,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightRightsRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 1)
-	m.Equal(Match{Left: leftResources[0], Right: rightResources[1]}, matches[0])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[0], Right: rightResources[1]}, matches[0])
 
 	m.Len(unmatchables, 2)
 	m.Equal([]interface{}{rightResources[0], rightResources[2]}, unmatchables)
@@ -185,7 +185,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightLeftsRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 1)
-	m.Equal(Match{Left: leftResources[2], Right: rightResources[0]}, matches[0])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[2], Right: rightResources[0]}, matches[0])
 
 	m.Len(unmatchables, 2)
 	m.Equal(leftResources[:2], unmatchables)
@@ -208,8 +208,8 @@ func (m *MatcherTestSuite) TestMultipleMatchesRightsRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 2)
-	m.Equal(Match{Left: leftResources[0], Right: rightResources[0]}, matches[0])
-	m.Equal(Match{Left: leftResources[1], Right: rightResources[1]}, matches[1])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[0], Right: rightResources[0]}, matches[0])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[1], Right: rightResources[1]}, matches[1])
 
 	m.Len(unmatchables, 2)
 	m.Equal(rightResources[2:], unmatchables)
@@ -232,8 +232,8 @@ func (m *MatcherTestSuite) TestMultipleMatchesLeftsRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 2)
-	m.Equal(Match{Left: leftResources[1], Right: rightResources[0]}, matches[0])
-	m.Equal(Match{Left: leftResources[2], Right: rightResources[1]}, matches[1])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[1], Right: rightResources[0]}, matches[0])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[2], Right: rightResources[1]}, matches[1])
 
 	m.Len(unmatchables, 2)
 	m.Equal([]interface{}{leftResources[0], leftResources[3]}, unmatchables)
@@ -258,8 +258,8 @@ func (m *MatcherTestSuite) TestMultipleMatchesBothRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 2)
-	m.Equal(Match{Left: leftResources[1], Right: rightResources[1]}, matches[0])
-	m.Equal(Match{Left: leftResources[3], Right: rightResources[3]}, matches[1])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[1], Right: rightResources[1]}, matches[0])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[3], Right: rightResources[3]}, matches[1])
 
 	m.Len(unmatchables, 4)
 	m.Equal([]interface{}{leftResources[0], leftResources[2], rightResources[0], rightResources[2]}, unmatchables)
@@ -283,7 +283,7 @@ func (m *MatcherTestSuite) TestMultipleMatchesOrderOfPreference() {
 
 	m.NoError(err)
 	m.Len(matches, 1)
-	m.Equal(Match{Left: leftResources[1], Right: rightResources[1]}, matches[0])
+	m.Equal(Match{ResourceType: "FooType", Left: leftResources[1], Right: rightResources[1]}, matches[0])
 
 	m.Len(unmatchables, 3)
 	m.Equal([]interface{}{leftResources[0], rightResources[0], rightResources[2]}, unmatchables)
