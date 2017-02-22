@@ -36,22 +36,6 @@ func (f *FooMatchingStrategy) Match(left interface{}, right interface{}) (isMatc
 	return l.Value == r.Value, nil
 }
 
-type BarType struct {
-	Value int
-}
-
-type BarMatchingStrategy struct{}
-
-func (f *BarMatchingStrategy) SupportedResourceType() string {
-	return "BarType"
-}
-
-func (f *BarMatchingStrategy) Match(left interface{}, right interface{}) (isMatch bool, err error) {
-	l := left.(*BarType)
-	r := right.(*BarType)
-	return l.Value == r.Value, nil
-}
-
 // ========================================================================= //
 // TEST MATCH                                                                //
 // ========================================================================= //
@@ -287,56 +271,4 @@ func (m *MatcherTestSuite) TestMultipleMatchesOrderOfPreference() {
 
 	m.Len(unmatchables, 3)
 	m.Equal([]interface{}{leftResources[0], rightResources[0], rightResources[2]}, unmatchables)
-}
-
-// ========================================================================= //
-// TEST SUPPORTING FUNCTIONS                                                 //
-// ========================================================================= //
-
-func (m *MatcherTestSuite) TestGetResourceType() {
-	test, err := testutil.LoadFixture("Patient", "../fixtures/patients/foo_bar.json")
-	m.NoError(err)
-	typeAsString := getResourceType(test)
-	m.Equal("Patient", typeAsString)
-}
-
-func (m *MatcherTestSuite) TestResourceMapKeys() {
-	rm := make(ResourceMap)
-	rm["foo"] = []interface{}{1}
-	rm["bar"] = []interface{}{1, 2}
-	rm["hey"] = []interface{}{1, 2, 3}
-
-	expected := []string{"foo", "bar", "hey"} // Not necessarily in this order
-	keys := rm.Keys()
-	for _, k := range keys {
-		m.True(contains(expected, k))
-	}
-}
-
-// ========================================================================= //
-// TEST SET FUNCTIONS                                                        //
-// ========================================================================= //
-
-func (m *MatcherTestSuite) TestSetIntersection() {
-	left := []string{"a", "b", "c"}
-	right := []string{"b", "c", "d"}
-
-	ints := intersection(left, right)
-	m.Equal([]string{"b", "c"}, ints)
-}
-
-func (m *MatcherTestSuite) TestSetDiff() {
-	left := []string{"a", "b", "c"}
-	right := []string{"b", "c", "d"}
-
-	lDiffs := setDiff(left, right)
-	m.Equal([]string{"a"}, lDiffs)
-
-	rDiffs := setDiff(right, left)
-	m.Equal([]string{"d"}, rDiffs)
-}
-
-func (m *MatcherTestSuite) TestSetContains() {
-	set := []string{"a", "b", "c"}
-	m.True(contains(set, "b"))
 }

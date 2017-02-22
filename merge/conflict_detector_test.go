@@ -1,11 +1,9 @@
 package merge
 
 import (
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/intervention-engine/fhir/models"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -17,75 +15,213 @@ func TestDetectorTestSuite(t *testing.T) {
 	suite.Run(t, new(DetectorTestSuite))
 }
 
+type BarType struct {
+	A string    `json:"a,omitempty"`
+	B *uint32   `json:"b,omitempty"`
+	C time.Time `json:"c,omitempty"`
+	D *BazType  `json:"d,omitempty"`
+}
+
+type BazType struct {
+	X string `json:"x,omitempty"`
+	Y *bool  `json:"y,omitempty"`
+}
+
 // ========================================================================= //
-// STRUCT TRAVERSAL                                                          //
+// TEST CONFLICT DETECTION                                                   //
 // ========================================================================= //
 
-func (d *DetectorTestSuite) TestStructTraversal() {
-	deceased := false
-	// Zero value pointers and strings are ignored, but zero numeric values should
-	// be preserved. The three major "zero" types are covered in this example:
-	// 1. nil pointers
-	// 2. empty strings
-	// 3. numeric values of 0
-	patient := &models.Patient{
-		Name: []models.HumanName{
-			models.HumanName{
-				Family: "Mercury",
-				Given:  []string{"Freddy"},
+func (d *DetectorTestSuite) TestPerfectMatchNoConflicts() {
+	leftNum := uint32(1)
+	rightNum := uint32(1)
+	leftBool := false
+	rightBool := false
+	t := time.Now().UTC()
+
+	match := &Match{
+		ResourceType: "BarType",
+		Left: &BarType{
+			A: "A",
+			B: &leftNum,
+			C: t,
+			D: &BazType{
+				X: "X",
+				Y: &leftBool,
 			},
 		},
-		Gender:          "Male",
-		DeceasedBoolean: &deceased,
-		MaritalStatus: &models.CodeableConcept{
-			Coding: []models.Coding{
-				models.Coding{
-					System:  "http://hl7.org/fhir/v3/MaritalStatus",
-					Code:    "M",
-					Display: "Married",
-				},
+		Right: &BarType{
+			A: "A",
+			B: &rightNum,
+			C: t,
+			D: &BazType{
+				X: "X",
+				Y: &rightBool,
 			},
-		},
-		Address: []models.Address{
-			models.Address{
-				Line:    []string{"1 London Way"},
-				City:    "London",
-				Country: "UK",
-			},
-		},
-		BirthDate: &models.FHIRDateTime{
-			// We don't traverse into time objects, so there will only be one path here
-			Time: time.Now(),
 		},
 	}
 
-	// Adding a contained quantity object to test the handling of zero-value numeric types.
-	quantity := float64(0)
-	patient.Contained = []interface{}{
-		models.Quantity{
-			Value: &quantity,
-			Unit:  "Songs",
+	detector := new(Detector)
+	conflict, err := detector.findConflicts(match)
+	d.NoError(err)
+
+	// A perfect match has no conflicts.
+	d.Nil(conflict)
+}
+
+func (d *DetectorTestSuite) TestPartialMatchSomeConflicts() {
+	leftNum := uint32(1)
+	rightNum := uint32(2)
+	leftBool := false
+	rightBool := true
+	t := time.Now().UTC()
+
+	match := &Match{
+		ResourceType: "BarType",
+		Left: &BarType{
+			A: "A",
+			B: &leftNum,
+			C: t,
+			D: &BazType{
+				X: "Y",
+				Y: &leftBool,
+			},
+		},
+		Right: &BarType{
+			A: "B",
+			B: &rightNum,
+			C: t,
+			D: &BazType{
+				X: "X",
+				Y: &rightBool,
+			},
 		},
 	}
 
-	paths := []string{}
-	// The order is deterministic. We expect these fields to be non-nil
-	// in the JSON equivalent of this patient object.
-	expected := []string{
-		"contained[0].value",
-		"contained[0].unit",
-		"name[0].family",
-		"name[0].given[0]",
-		"gender", "birthDate",
-		"deceasedBoolean",
-		"address[0].line[0]",
-		"address[0].city",
-		"address[0].country",
-		"maritalStatus.coding[0].system",
-		"maritalStatus.coding[0].code",
-		"maritalStatus.coding[0].display",
+	detector := new(Detector)
+	conflict, err := detector.findConflicts(match)
+	d.NoError(err)
+	d.NotNil(conflict)
+
+	d.Len(conflict.Issue, 1)
+	issue := conflict.Issue[0]
+
+	d.Len(issue.Location, 4)
+}
+
+func (d *DetectorTestSuite) TestUncommonPathsSomeConflicts() {
+	leftNum := uint32(1)
+	rightNum := uint32(1)
+	rightBool := false
+	t := time.Now().UTC()
+
+	// The left resource has fields not in the right, the right has fields
+	// not in the left. These should automatically be conflicts.
+	match := &Match{
+		ResourceType: "BarType",
+		Left: &BarType{
+			A: "A",
+			B: &leftNum,
+			C: t,
+		},
+		Right: &BarType{
+			B: &rightNum,
+			C: t,
+			D: &BazType{
+				X: "X",
+				Y: &rightBool,
+			},
+		},
 	}
-	value := reflect.ValueOf(*patient)
-	traverse(&paths, value, "")
-	d.Equal(expected, paths)
+
+	detector := new(Detector)
+	conflict, err := detector.findConflicts(match)
+	d.NoError(err)
+	d.NotNil(conflict)
+
+	// Should be 1 conflict with 3 locations: left a, right d.x, right d.y
+	d.Len(conflict.Issue, 1)
+	d.Len(conflict.Issue[0].Location, 3)
+
+	expectedPaths := []string{"a", "d.x", "d.y"}
+	for _, loc := range conflict.Issue[0].Location {
+		d.True(contains(expectedPaths, loc))
+	}
+}
+
+func (d *DetectorTestSuite) TestMultipleMatchesSomeConflicts() {
+	leftNum1 := uint32(1)
+	rightNum1 := uint32(2)
+	leftBool1 := true
+	rightBool1 := false
+	t1 := time.Now().UTC()
+
+	// Conflicts: b, d.y
+	match1 := &Match{
+		ResourceType: "BarType",
+		Left: &BarType{
+			A: "A",
+			B: &leftNum1,
+			C: t1,
+			D: &BazType{
+				X: "X",
+				Y: &leftBool1,
+			},
+		},
+		Right: &BarType{
+			A: "A",
+			B: &rightNum1,
+			C: t1,
+			D: &BazType{
+				X: "X",
+				Y: &rightBool1,
+			},
+		},
+	}
+
+	rightNum2 := uint32(14)
+	leftBool2 := true
+	t2 := time.Now().UTC()
+
+	// Conflicts: a, b, c, d.y
+	match2 := &Match{
+		ResourceType: "BarType",
+		Left: &BarType{
+			A: "B",
+			C: t1,
+			D: &BazType{
+				X: "X",
+				Y: &leftBool2,
+			},
+		},
+		Right: &BarType{
+			A: "A",
+			B: &rightNum2,
+			C: t2,
+			D: &BazType{
+				X: "X",
+			},
+		},
+	}
+
+	detector := new(Detector)
+	conflicts, err := detector.AllConflicts([]Match{*match1, *match2})
+	d.NoError(err)
+
+	d.Len(conflicts, 2)
+	conflict0 := conflicts[0]
+	d.Len(conflict0.Issue, 1)
+	conflict1 := conflicts[1]
+	d.Len(conflict1.Issue, 1)
+
+	// Validate the first conflict.
+	expectedPaths := []string{"b", "d.y"}
+	for _, loc := range conflict0.Issue[0].Location {
+		d.True(contains(expectedPaths, loc))
+	}
+
+	// Validate the second conflict.
+	expectedPaths = []string{"a", "b", "c", "d.y"}
+	for _, loc := range conflict1.Issue[0].Location {
+		d.True(contains(expectedPaths, loc))
+	}
 }

@@ -2,8 +2,6 @@ package merge
 
 import (
 	"fmt"
-	"reflect"
-	"strings"
 
 	"github.com/intervention-engine/fhir/models"
 )
@@ -153,62 +151,6 @@ func (m *Matcher) matchWithoutReplacement(left, right []interface{}, strategy Ma
 func (m *Matcher) supportsMatchingStrategyForResourceType(resourceType string) bool {
 	for key := range MatchingStrategies {
 		if key == resourceType {
-			return true
-		}
-	}
-	return false
-}
-
-// ResourceMap is used to map a list of resources to their specific type.
-type ResourceMap map[string][]interface{}
-
-func (r ResourceMap) Keys() []string {
-	keys := make([]string, len(r))
-	i := 0
-	for k := range r {
-		keys[i] = k
-		i++
-	}
-	return keys
-}
-
-func getResourceType(resource interface{}) string {
-	// For example, "*models.Patient"
-	typeWithPackage := reflect.TypeOf(resource).String()
-	// So split that part out.
-	parts := strings.Split(typeWithPackage, ".")
-	if len(parts) != 2 {
-		return ""
-	}
-	return parts[1]
-}
-
-// intersection returns all elements in left that are also in right.
-func intersection(left, right []string) []string {
-	both := []string{}
-	for _, el := range left {
-		if contains(right, el) {
-			both = append(both, el)
-		}
-	}
-	return both
-}
-
-// setDiff returns all elements in left that are NOT in right.
-func setDiff(left, right []string) []string {
-	diffs := []string{}
-	for _, el := range left {
-		if !contains(right, el) {
-			diffs = append(diffs, el)
-		}
-	}
-	return diffs
-}
-
-// contains tests if an element is in the set.
-func contains(set []string, el string) bool {
-	for _, item := range set {
-		if item == el {
 			return true
 		}
 	}
