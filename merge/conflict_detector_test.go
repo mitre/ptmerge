@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -224,4 +225,78 @@ func (d *DetectorTestSuite) TestMultipleMatchesSomeConflicts() {
 	for _, loc := range conflict1.Issue[0].Location {
 		d.True(contains(expectedPaths, loc))
 	}
+}
+
+// ========================================================================= //
+// TEST REFLECTION VALUE COMPARISON                                          //
+// ========================================================================= //
+
+func (rt *ResourceTraversalTestSuite) TestCompareStringValues() {
+	d := new(Detector)
+
+	v1 := reflect.ValueOf("hello")
+	v2 := reflect.ValueOf("hello")
+	rt.True(d.compareValues(v1, v2))
+
+	v3 := reflect.ValueOf("world")
+	rt.False(d.compareValues(v1, v3))
+}
+
+func (rt *ResourceTraversalTestSuite) TestCompareIntegerValues() {
+	d := new(Detector)
+
+	i1 := reflect.ValueOf(uint32(2))
+	i2 := reflect.ValueOf(uint32(2))
+	rt.True(d.compareValues(i1, i2))
+
+	i3 := reflect.ValueOf(uint32(0))
+	rt.False(d.compareValues(i1, i3))
+
+	i4 := reflect.ValueOf(uint32(0))
+	rt.True(d.compareValues(i3, i4))
+}
+
+func (rt *ResourceTraversalTestSuite) TestCompareFloatValues() {
+	d := new(Detector)
+
+	i1 := reflect.ValueOf(float64(5.2))
+	i2 := reflect.ValueOf(float64(5.2))
+	rt.True(d.compareValues(i1, i2))
+
+	i3 := reflect.ValueOf(float64(0))
+	rt.False(d.compareValues(i1, i3))
+
+	i4 := reflect.ValueOf(float64(0))
+	rt.True(d.compareValues(i3, i4))
+}
+
+func (rt *ResourceTraversalTestSuite) TestCompareBooleanValues() {
+	d := new(Detector)
+
+	v1 := reflect.ValueOf(false)
+	v2 := reflect.ValueOf(false)
+	rt.True(d.compareValues(v1, v2))
+
+	v3 := reflect.ValueOf(true)
+	rt.False(d.compareValues(v1, v3))
+}
+
+func (rt *ResourceTraversalTestSuite) TestCompareTimeValues() {
+	d := new(Detector)
+
+	t := time.Now().UTC()
+	t1 := reflect.ValueOf(t)
+	t2 := reflect.ValueOf(t)
+	rt.True(d.compareValues(t1, t2))
+
+	t3 := reflect.ValueOf(time.Now().UTC())
+	rt.False(d.compareValues(t1, t3))
+}
+
+func (rt *ResourceTraversalTestSuite) TestCompareDifferentKindsAlwaysFalse() {
+	d := new(Detector)
+
+	v1 := reflect.ValueOf("foo")
+	v2 := reflect.ValueOf(3)
+	rt.False(d.compareValues(v1, v2))
 }

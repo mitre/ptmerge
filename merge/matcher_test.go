@@ -1,7 +1,9 @@
 package merge
 
 import (
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/intervention-engine/fhir/models"
 	"github.com/mitre/ptmerge/testutil"
@@ -16,81 +18,35 @@ func TestMatcherTestSuite(t *testing.T) {
 	suite.Run(t, new(MatcherTestSuite))
 }
 
-// ========================================================================= //
-// MATCHING STRATEGY INTERFACE MOCKS                                         //
-// ========================================================================= //
-
 type FooType struct {
-	Value int
-}
-
-type FooMatchingStrategy struct{}
-
-func (f *FooMatchingStrategy) SupportedResourceType() string {
-	return "FooType"
-}
-
-func (f *FooMatchingStrategy) Match(left interface{}, right interface{}) (isMatch bool, err error) {
-	l := left.(*FooType)
-	r := right.(*FooType)
-	return l.Value == r.Value, nil
+	Value int `json:"value,omitempty"`
 }
 
 // ========================================================================= //
 // TEST MATCH                                                                //
 // ========================================================================= //
 
-func (m *MatcherTestSuite) TestMatch() {
-	fix1, err := testutil.LoadFixture("Bundle", "../fixtures/clint_abbot_bundle.json")
-	m.NoError(err)
-	m.NotNil(fix1)
-	bundle1, ok := fix1.(*models.Bundle)
-	m.True(ok)
-
-	fix2, err := testutil.LoadFixture("Bundle", "../fixtures/john_peters_bundle.json")
-	m.NoError(err)
-	m.NotNil(fix2)
-	bundle2, ok := fix2.(*models.Bundle)
-	m.True(ok)
-
-	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.Match(bundle1, bundle2)
-	m.NoError(err)
-
-	// There are no MatchingStrategies implemented yet, so this should return the union
-	// of both bundles, left first.
-	m.Len(matches, 0)
-	m.Len(unmatchables, len(bundle1.Entry)+len(bundle2.Entry))
-	m.Equal(bundle1.Entry[0].Resource, unmatchables[0])
-}
+// TODO: Implement a series of fixtures and tests to adequately validate matching.
 
 // ========================================================================= //
 // TEST PRIVATE METHODS                                                      //
 // ========================================================================= //
 
-func (m *MatcherTestSuite) TestSupportsMatchingStrategyForResourceType() {
-	MatchingStrategies["Foo"] = new(FooMatchingStrategy)
-	matcher := new(Matcher)
-	m.True(matcher.supportsMatchingStrategyForResourceType("Foo"))
-
-	delete(MatchingStrategies, "Foo")
-	m.False(matcher.supportsMatchingStrategyForResourceType("Foo"))
-}
-
-func (m *MatcherTestSuite) TestCollectMatchableResources() {
+func (m *MatcherTestSuite) TestCollectResources() {
 	fix, err := testutil.LoadFixture("Bundle", "../fixtures/clint_abbot_bundle.json")
 	m.NoError(err)
 	m.NotNil(fix)
 	bundle, ok := fix.(*models.Bundle)
 	m.True(ok)
 	matcher := new(Matcher)
-	matchables, unmatchables, err := matcher.collectMatchableResources(bundle)
+	resourceMap, err := matcher.collectResources(bundle)
 	m.NoError(err)
-	// No custom matchers have been implemented yet, so everything should be "unmatchable".
-	m.NotNil(matchables)
-	m.Equal([]string{}, matchables.Keys())
-	m.NotNil(unmatchables)
-	m.Equal(len(bundle.Entry), len(unmatchables))
+	m.NotNil(resourceMap)
+
+	expectedResourceTypes := []string{"Patient", "Encounter", "Condition", "MedicationStatement"}
+	for _, resourceType := range resourceMap.Keys() {
+		m.True(contains(expectedResourceTypes, resourceType))
+	}
 }
 
 // ========================================================================= //
@@ -106,7 +62,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightNoneRemaining() {
 	}
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources, &FooMatchingStrategy{})
+	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources)
 
 	m.NoError(err)
 	m.Len(matches, 1)
@@ -124,7 +80,7 @@ func (m *MatcherTestSuite) TestOneLeftDoesntMatchOneRight() {
 	}
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources, &FooMatchingStrategy{})
+	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources)
 
 	m.NoError(err)
 	m.Len(matches, 0)
@@ -144,7 +100,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightRightsRemaining() {
 	}
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources, &FooMatchingStrategy{})
+	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources)
 
 	m.NoError(err)
 	m.Len(matches, 1)
@@ -165,7 +121,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightLeftsRemaining() {
 	}
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources, &FooMatchingStrategy{})
+	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources)
 
 	m.NoError(err)
 	m.Len(matches, 1)
@@ -188,7 +144,7 @@ func (m *MatcherTestSuite) TestMultipleMatchesRightsRemaining() {
 	}
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources, &FooMatchingStrategy{})
+	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources)
 
 	m.NoError(err)
 	m.Len(matches, 2)
@@ -212,7 +168,7 @@ func (m *MatcherTestSuite) TestMultipleMatchesLeftsRemaining() {
 	}
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources, &FooMatchingStrategy{})
+	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources)
 
 	m.NoError(err)
 	m.Len(matches, 2)
@@ -238,7 +194,7 @@ func (m *MatcherTestSuite) TestMultipleMatchesBothRemaining() {
 	}
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources, &FooMatchingStrategy{})
+	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources)
 
 	m.NoError(err)
 	m.Len(matches, 2)
@@ -263,7 +219,7 @@ func (m *MatcherTestSuite) TestMultipleMatchesOrderOfPreference() {
 	}
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources, &FooMatchingStrategy{})
+	matches, unmatchables, err := matcher.matchWithoutReplacement(leftResources, rightResources)
 
 	m.NoError(err)
 	m.Len(matches, 1)
@@ -271,4 +227,110 @@ func (m *MatcherTestSuite) TestMultipleMatchesOrderOfPreference() {
 
 	m.Len(unmatchables, 3)
 	m.Equal([]interface{}{leftResources[0], rightResources[0], rightResources[2]}, unmatchables)
+}
+
+// ========================================================================= //
+// TEST COMPARING RESOURCES                                                  //
+// ========================================================================= //
+
+func (m *MatcherTestSuite) TestComparePathsMatchAboveThreshold() {
+
+}
+
+func (m *MatcherTestSuite) TestComparePathsNoMatchBelowThreshold() {
+
+}
+
+func (m *MatcherTestSuite) TestComparePathsMatchLowThresholdNoMatchHighThreshold() {
+
+}
+
+// ========================================================================= //
+// TEST MATCH VALUES                                                         //
+// ========================================================================= //
+
+func (m *MatcherTestSuite) TestMatchStringValues() {
+	matcher := new(Matcher)
+
+	v1 := reflect.ValueOf("hello")
+	v2 := reflect.ValueOf("hello")
+	m.True(matcher.matchValues(v1, v2))
+
+	v3 := reflect.ValueOf("world")
+	m.False(matcher.matchValues(v1, v3))
+}
+
+func (m *MatcherTestSuite) TestMatchIntegerValues() {
+	matcher := new(Matcher)
+
+	i1 := reflect.ValueOf(uint32(2))
+	i2 := reflect.ValueOf(uint32(2))
+	m.True(matcher.matchValues(i1, i2))
+
+	i3 := reflect.ValueOf(uint32(0))
+	m.False(matcher.matchValues(i1, i3))
+
+	i4 := reflect.ValueOf(uint32(0))
+	m.True(matcher.matchValues(i3, i4))
+}
+
+func (m *MatcherTestSuite) TestMatchFloatValues() {
+	matcher := new(Matcher)
+
+	i1 := reflect.ValueOf(float64(5.2))
+	i2 := reflect.ValueOf(float64(5.2))
+	m.True(matcher.matchValues(i1, i2))
+
+	i3 := reflect.ValueOf(float64(0))
+	m.False(matcher.matchValues(i1, i3))
+
+	i4 := reflect.ValueOf(float64(0))
+	m.True(matcher.matchValues(i3, i4))
+}
+
+func (m *MatcherTestSuite) TestMatchBooleanValues() {
+	matcher := new(Matcher)
+
+	v1 := reflect.ValueOf(false)
+	v2 := reflect.ValueOf(false)
+	m.True(matcher.matchValues(v1, v2))
+
+	v3 := reflect.ValueOf(true)
+	m.False(matcher.matchValues(v1, v3))
+}
+
+func (m *MatcherTestSuite) TestMatchTimeValues() {
+	matcher := new(Matcher)
+
+	t := time.Now().UTC()
+	t1 := reflect.ValueOf(t)
+	t2 := reflect.ValueOf(t)
+	m.True(matcher.matchValues(t1, t2))
+
+	t3 := reflect.ValueOf(time.Now().UTC())
+	m.True(matcher.matchValues(t1, t3))
+}
+
+func (m *MatcherTestSuite) TestMatchDifferentKindsAlwaysFalse() {
+	matcher := new(Matcher)
+
+	v1 := reflect.ValueOf("foo")
+	v2 := reflect.ValueOf(3)
+	m.False(matcher.matchValues(v1, v2))
+}
+
+// ========================================================================= //
+// TEST FUZZY MATCHERS                                                       //
+// ========================================================================= //
+
+func (m *MatcherTestSuite) TestFuzzyFloatMatch() {
+
+}
+
+func (m *MatcherTestSuite) TestFuzzyTimeMatchUTC() {
+
+}
+
+func (m *MatcherTestSuite) TestFuzzyTimeMatchEST() {
+
 }

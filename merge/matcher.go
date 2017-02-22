@@ -2,14 +2,17 @@ package merge
 
 import (
 	"fmt"
+	"math"
+	"reflect"
+	"time"
 
 	"github.com/intervention-engine/fhir/models"
 )
 
-// MatchingStrategies maps a custom matching strategy to a specific resource type.
-// For example, "Patient": &PatientMatchingStrategy{}. To be used by Matcher.Match()
-// any new custom matching strategy must be registered here.
-var MatchingStrategies = map[string]MatchingStrategy{}
+const (
+	FLOAT_TOLERANCE = 0.000001 // 6 decimal places
+	MATCH_THRESHOLD = 0.8      // 80% match
+)
 
 // Matcher provides tools for identifying all resources in 2 source bundles that "match".
 type Matcher struct{}
@@ -19,45 +22,44 @@ type Matcher struct{}
 // returned as a slice of Match pairs. Resources without a match are returned separately as a slice of "unmatchables".
 func (m *Matcher) Match(leftBundle *models.Bundle, rightBundle *models.Bundle) (matches []Match, unmatchables []interface{}, err error) {
 
-	// First collect and separate out all resources we can or cannot match.
-	leftMatchables, leftUnmatchables, err := m.collectMatchableResources(leftBundle)
+	// First collect all resources in the bundle that we'll attempt to match.
+	leftResources, err := m.collectResources(leftBundle)
 	if err != nil {
 		return nil, nil, err
 	}
-	unmatchables = append(unmatchables, leftUnmatchables...)
 
-	rightMatchables, rightUnmatchables, err := m.collectMatchableResources(rightBundle)
+	rightResources, err := m.collectResources(rightBundle)
 	if err != nil {
 		return nil, nil, err
 	}
-	unmatchables = append(unmatchables, rightUnmatchables...)
 
-	// There are now three sets to consider:
+	// There are now three sets of resource types to consider:
 	// 1. L intersect R - these are all the resource types we'll attempt to match
 	// 2. L not in R - these are "unmatchable" left resource types
 	// 3. R not in L - these are "unmatchable" right resource types
-	matchableResourceTypes := intersection(leftMatchables.Keys(), rightMatchables.Keys())
-	leftUnmatchableResourceTypes := setDiff(leftMatchables.Keys(), rightMatchables.Keys())  // L not in R
-	rightUnmatchableResourceTypes := setDiff(rightMatchables.Keys(), leftMatchables.Keys()) // R not in L
+	matchableResourceTypes := intersection(leftResources.Keys(), rightResources.Keys())
+	leftUnmatchableResourceTypes := setDiff(leftResources.Keys(), rightResources.Keys())  // L not in R
+	rightUnmatchableResourceTypes := setDiff(rightResources.Keys(), leftResources.Keys()) // R not in L
 
 	// Handle all of the unmatchable resource types.
 	for _, key := range leftUnmatchableResourceTypes {
-		unmatchables = append(unmatchables, leftMatchables[key]...)
+		unmatchables = append(unmatchables, leftResources[key]...)
 	}
 
 	for _, key := range rightUnmatchableResourceTypes {
-		unmatchables = append(unmatchables, rightMatchables[key]...)
+		unmatchables = append(unmatchables, rightResources[key]...)
 	}
 
 	// Handle all of the matchable resource types. Since the resourceType key existed
-	// in both the leftMatchables and rightMatchables, there is guaranteed to be at least
+	// in both the leftResources and rightResources, there is guaranteed to be at least
 	// one resource of each resourceType in both sets.
 	for _, resourceType := range matchableResourceTypes {
-		leftResources := leftMatchables[resourceType]
-		rightResources := rightMatchables[resourceType]
+		lefts := leftResources[resourceType]
+		rights := rightResources[resourceType]
 
-		// Performs matching without replacement.
-		someMatches, someUnmatchables, err := m.matchWithoutReplacement(leftResources, rightResources, MatchingStrategies[resourceType])
+		// Performs matching without replacement, always comparing the next available left
+		// to the remaining rights.
+		someMatches, someUnmatchables, err := m.matchWithoutReplacement(lefts, rights)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -67,10 +69,9 @@ func (m *Matcher) Match(leftBundle *models.Bundle, rightBundle *models.Bundle) (
 	return matches, unmatchables, nil
 }
 
-// Processes all resources in a bundle and determines if they can be "matched". A resource can
-// only be matched if a MatchingStrategy is implemented and registered for its resource type.
-func (m *Matcher) collectMatchableResources(bundle *models.Bundle) (matchables ResourceMap, unmatchables []interface{}, err error) {
-	matchables = make(ResourceMap)
+// Collects all resources in a bundle into structs that match their resource types.
+func (m *Matcher) collectResources(bundle *models.Bundle) (resources ResourceMap, err error) {
+	resources = make(ResourceMap)
 
 	for _, entry := range bundle.Entry {
 		// Get the entry.Resource's type.
@@ -78,48 +79,58 @@ func (m *Matcher) collectMatchableResources(bundle *models.Bundle) (matchables R
 		// Make sure it's a known FHIR type.
 		s := models.StructForResourceName(resourceType)
 		if s == nil {
-			return nil, nil, fmt.Errorf("Unknown resource type %s", resourceType)
+			return nil, fmt.Errorf("Unknown resource type %s", resourceType)
 		}
 
-		if m.supportsMatchingStrategyForResourceType(resourceType) {
-			matchables[resourceType] = append(matchables[resourceType], entry.Resource)
-		} else {
-			unmatchables = append(unmatchables, entry.Resource)
-		}
+		resources[resourceType] = append(resources[resourceType], entry.Resource)
 	}
-	return matchables, unmatchables, nil
+	return resources, nil
 }
 
-// Performs matching without replacement using the given strategy. If a match is found between a left resource and a
-// right resource, a new Match is created and the left and right are removed from their respective slices. Matching stops
-// when there are no elements remaining in one of the slices. The original slices are copied before being modified.
-func (m *Matcher) matchWithoutReplacement(left, right []interface{}, strategy MatchingStrategy) (matches []Match, unmatchables []interface{}, err error) {
+// Performs matching without replacement. If a match is found between a left resource and a
+// right resource, a new Match is created and the left and right are removed from their respective
+// slices. Matching stops when there are no elements remaining in one of the slices. The original
+// slices are copied before being modified.
+func (m *Matcher) matchWithoutReplacement(lefts, rights []interface{}) (matches []Match, unmatchables []interface{}, err error) {
 
 	// Make copies since these slices will be mutated.
-	leftResources := make([]interface{}, len(left))
-	copy(leftResources, left)
-	rightResources := make([]interface{}, len(right))
-	copy(rightResources, right)
+	leftResources := make([]interface{}, len(lefts))
+	copy(leftResources, lefts)
+	rightResources := make([]interface{}, len(rights))
+	copy(rightResources, rights)
 
-	for len(leftResources) > 0 {
-		// For consistency we always start with the first element in the left slice.
-		// Remove the resource from the front of the slice, then compare it to everything
-		// remaining in the right slice.
+	// Build a PathMap for each resource that can be used to compare them. We do this only
+	// once at the start of matching to minimize the use of reflection.
+	leftPathMaps := m.traverseResources(leftResources)
+	rightPathMaps := m.traverseResources(rightResources)
+
+	for len(leftPathMaps) > 0 {
+		// For consistency we always start with the first resource in the left slice.
+		// Remove the resource and PathMap from the front of each slice, then compare
+		// to everything remaining in the right slice.
 		leftResource := leftResources[0]
 		leftResources = leftResources[1:]
 
-		matchFound := false
-		matchIdx := 0
+		leftPathMap := leftPathMaps[0]
+		leftPathMaps = leftPathMaps[1:]
 
-		for _, rightResource := range rightResources {
-			matchFound, err = strategy.Match(leftResource, rightResource)
-			if err != nil {
-				return nil, nil, err
+		matchIdx := 0
+		matchFound := false
+		for i := 0; i < len(rightResources); i++ {
+			rightResource := rightResources[i]
+			rightPathMap := rightPathMaps[i]
+
+			// Left and right must be the same type of resource.
+			leftResourceType := getResourceType(leftResource)
+			rightResourceType := getResourceType(rightResource)
+			if leftResourceType != rightResourceType {
+				return nil, nil, fmt.Errorf("Mismatched resource types %s and %s, cannot compare", leftResourceType, rightResourceType)
 			}
 
+			matchFound = m.comparePaths(leftPathMap, rightPathMap)
 			if matchFound {
 				matches = append(matches, Match{
-					ResourceType: strategy.SupportedResourceType(),
+					ResourceType: leftResourceType, // could also use rightResourceType
 					Left:         leftResource,
 					Right:        rightResource,
 				})
@@ -130,10 +141,11 @@ func (m *Matcher) matchWithoutReplacement(left, right []interface{}, strategy Ma
 		}
 
 		if matchFound {
-			// Remove the rightResource from its slice.
+			// Remove the right resource and PathMap from their slices.
 			rightResources = append(rightResources[:matchIdx], rightResources[matchIdx+1:]...)
+			rightPathMaps = append(rightPathMaps[:matchIdx], rightPathMaps[matchIdx+1:]...)
 		} else {
-			// No match was found, so the leftResource has no match. Right resources remain unchanged.
+			// No match was found, so the left resource is unmatchable.
 			unmatchables = append(unmatchables, leftResource)
 		}
 	}
@@ -146,13 +158,100 @@ func (m *Matcher) matchWithoutReplacement(left, right []interface{}, strategy Ma
 	return matches, unmatchables, nil
 }
 
-// Returns true if a known matching strategy is implemented for the given resourceType.
-// All matching strategies should be registered in the MatchingStrategies map.
-func (m *Matcher) supportsMatchingStrategyForResourceType(resourceType string) bool {
-	for key := range MatchingStrategies {
-		if key == resourceType {
-			return true
+// traverses a list of resources, generating a PathMap for each.
+func (m *Matcher) traverseResources(resources []interface{}) []PathMap {
+	pathMaps := make([]PathMap, len(resources))
+
+	for i, resource := range resources {
+		pathmap := make(PathMap)
+		traverse(reflect.ValueOf(resource), pathmap, "")
+		pathMaps[i] = pathmap
+	}
+	return pathMaps
+}
+
+// comparePaths compares all common paths between two resources. If enough values at those
+// paths "match", the resources are considered a match.
+func (m *Matcher) comparePaths(leftPathMap, rightPathMap PathMap) bool {
+	// We can only match on paths in both resources.
+	commonPaths := intersection(leftPathMap.Keys(), rightPathMap.Keys())
+
+	if len(commonPaths) == 0 {
+		// There is nothing in-common to match on.
+		return false
+	}
+
+	matchCounter := 0
+	for _, cp := range commonPaths {
+		if m.matchValues(leftPathMap[cp], rightPathMap[cp]) {
+			matchCounter++
 		}
 	}
+
+	// Test how many of the common paths were a match. If the percentage of matches exceeds
+	// the configurable threshold, we've got a match. At this point len(commonPaths) is guaranteed
+	// to be greater than 0, making division by 0 impossible.
+	if (float64(matchCounter) / float64(len(commonPaths))) >= MATCH_THRESHOLD {
+		return true
+	}
 	return false
+}
+
+// matchValues compares 2 reflected values obtained by traversing FHIR resources. The values
+// must be of the same kind to do a comparison. matchValues should only be used to match up values
+// collected by traverse(). Traverse ensures that only primitive go types (strings, bools, ints, etc.)
+// are collected as valid paths for comparison. Matching may be imperfect, or "fuzzy".
+func (m *Matcher) matchValues(left, right reflect.Value) bool {
+	if left.Kind() != right.Kind() {
+		return false
+	}
+
+	switch left.Kind() {
+	case reflect.String:
+		return left.String() == right.String()
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return left.Uint() == right.Uint()
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return left.Int() == right.Int()
+
+	case reflect.Float32, reflect.Float64:
+		return fuzzyFloatMatch(left.Float(), right.Float())
+
+	case reflect.Bool:
+		return left.Bool() == right.Bool()
+
+	// This is only for time.Time objects, all other structs should have been traversed.
+	case reflect.Struct:
+		leftTime, ok := left.Interface().(time.Time)
+		if !ok {
+			return false
+		}
+		rightTime, ok := right.Interface().(time.Time)
+		if !ok {
+			return false
+		}
+		return fuzzyTimeMatch(leftTime, rightTime)
+
+	default:
+		return false
+	}
+}
+
+func fuzzyFloatMatch(leftFloat, rightFloat float64) bool {
+	// Floats are matched to within a given tolerance (e.g. 0.000001).
+	if math.Abs(leftFloat-rightFloat) <= FLOAT_TOLERANCE {
+		return true
+	}
+	return false
+}
+
+func fuzzyTimeMatch(leftTime, rightTime time.Time) bool {
+	// Timestamps are a "match" if they occur on the same calendar day.
+	// Using UTC eliminates any localization issues.
+	leftY, leftM, leftD := leftTime.UTC().Date()
+	rightY, rightM, rightD := rightTime.UTC().Date()
+
+	return ((leftY == rightY) && (leftM == rightM) && (leftD == rightD))
 }
