@@ -26,6 +26,7 @@ func traverse(value reflect.Value, paths PathMap, path string) {
 		// We don't traverse into time objects.
 		if value.Type().Name() == "Time" {
 			paths[path] = value
+			return
 		}
 
 		// Traverse all non-nil fields in the struct, building up their json paths.
@@ -48,7 +49,7 @@ func traverse(value reflect.Value, paths PathMap, path string) {
 			}
 		}
 
-	case reflect.Slice:
+	case reflect.Slice, reflect.Array:
 		// Traverse all elements in the slice.
 		for i := 0; i < value.Len(); i++ {
 			traverse(value.Index(i), paths, path+fmt.Sprintf("[%d]", i))

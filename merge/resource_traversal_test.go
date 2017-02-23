@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/intervention-engine/fhir/models"
 	"github.com/stretchr/testify/suite"
 )
@@ -89,8 +88,6 @@ func (rt *ResourceTraversalTestSuite) TestStructTraversal() {
 	value := reflect.ValueOf(*patient)
 	pathmap := make(PathMap)
 	traverse(value, pathmap, "")
-
-	spew.Dump(pathmap.Keys())
 
 	// The order of the keys is not deterministic, so we need to use contains().
 	for _, k := range pathmap.Keys() {

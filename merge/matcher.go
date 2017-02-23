@@ -4,14 +4,24 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/intervention-engine/fhir/models"
 )
 
-const (
-	FLOAT_TOLERANCE = 0.000001 // 6 decimal places
-	MATCH_THRESHOLD = 0.8      // 80% match
+var (
+	// PathsUnsuitableForComparison are paths that don't offer meaningful comparison
+	// between two resources. For example, URLs or code systems.
+	PathsUnsuitableForComparison = []string{"url", "system", "id", "_id", "text"}
+
+	// FloatTolerance identifies the minumum difference between 2 floats that still
+	// allows them to be considered a match.
+	FloatTolerance = 0.0001
+
+	// MatchThreshold is the total percentage of non-nil paths in a resource that must
+	// match for the whole resource to be considered a match.
+	MatchThreshold = 0.8
 )
 
 // Matcher provides tools for identifying all resources in 2 source bundles that "match".
@@ -20,7 +30,7 @@ type Matcher struct{}
 // Match iterates through all resources in the two source bundles and attempts to find resources that "match". These
 // resources can then be compared to each other to see what conflicts may still exist between them. All matches are
 // returned as a slice of Match pairs. Resources without a match are returned separately as a slice of "unmatchables".
-func (m *Matcher) Match(leftBundle *models.Bundle, rightBundle *models.Bundle) (matches []Match, unmatchables []interface{}, err error) {
+func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match, unmatchables []interface{}, err error) {
 
 	// First collect all resources in the bundle that we'll attempt to match.
 	leftResources, err := m.collectResources(leftBundle)
@@ -176,25 +186,43 @@ func (m *Matcher) comparePaths(leftPathMap, rightPathMap PathMap) bool {
 	// We can only match on paths in both resources.
 	commonPaths := intersection(leftPathMap.Keys(), rightPathMap.Keys())
 
-	if len(commonPaths) == 0 {
+	// But don't match on every path - some are unsuitable for matching.
+	matchablePaths := m.stripUnsuitablePaths(commonPaths)
+
+	totalCriteria := float64(len(matchablePaths))
+	matchCounter := 0.0
+
+	if totalCriteria == 0 {
 		// There is nothing in-common to match on.
 		return false
 	}
 
-	matchCounter := 0
-	for _, cp := range commonPaths {
+	for _, cp := range matchablePaths {
 		if m.matchValues(leftPathMap[cp], rightPathMap[cp]) {
 			matchCounter++
 		}
 	}
 
 	// Test how many of the common paths were a match. If the percentage of matches exceeds
-	// the configurable threshold, we've got a match. At this point len(commonPaths) is guaranteed
-	// to be greater than 0, making division by 0 impossible.
-	if (float64(matchCounter) / float64(len(commonPaths))) >= MATCH_THRESHOLD {
+	// the configurable MatchThreshold, we've got a match. At this point totalCriteria is
+	// guaranteed to be greater than 0, making division by 0 impossible.
+	if (matchCounter / totalCriteria) >= MatchThreshold {
 		return true
 	}
 	return false
+}
+
+// stripUnsuitablePaths elminiates any paths that are unsuitable for matching,
+// for example IDs, internal URLs, or code system identifiers.
+func (m *Matcher) stripUnsuitablePaths(paths []string) []string {
+	matchablePaths := make([]string, 0, len(paths))
+
+	for _, path := range paths {
+		if !ciPathContainsAny(path, PathsUnsuitableForComparison) {
+			matchablePaths = append(matchablePaths, path)
+		}
+	}
+	return matchablePaths
 }
 
 // matchValues compares 2 reflected values obtained by traversing FHIR resources. The values
@@ -240,18 +268,33 @@ func (m *Matcher) matchValues(left, right reflect.Value) bool {
 }
 
 func fuzzyFloatMatch(leftFloat, rightFloat float64) bool {
-	// Floats are matched to within a given tolerance (e.g. 0.000001).
-	if math.Abs(leftFloat-rightFloat) <= FLOAT_TOLERANCE {
+	// Floats are matched to within a given tolerance (e.g. 0.00001).
+	if math.Abs(leftFloat-rightFloat) <= FloatTolerance {
 		return true
 	}
 	return false
 }
 
 func fuzzyTimeMatch(leftTime, rightTime time.Time) bool {
+	// Check the the times both use the same location.
+	if leftTime.Location() != rightTime.Location() {
+		return false
+	}
+
 	// Timestamps are a "match" if they occur on the same calendar day.
-	// Using UTC eliminates any localization issues.
-	leftY, leftM, leftD := leftTime.UTC().Date()
-	rightY, rightM, rightD := rightTime.UTC().Date()
+	leftY, leftM, leftD := leftTime.Date()
+	rightY, rightM, rightD := rightTime.Date()
 
 	return ((leftY == rightY) && (leftM == rightM) && (leftD == rightD))
+}
+
+// test if a path contains any of these items, case-insensitive.
+func ciPathContainsAny(path string, items []string) bool {
+	lowercasePath := strings.ToLower(path)
+	for _, item := range items {
+		if strings.Contains(lowercasePath, strings.ToLower(item)) {
+			return true
+		}
+	}
+	return false
 }
