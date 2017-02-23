@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"time"
 )
 
 // traverse recursively iterates through all non-nil fields in a resource, identifying the JSON paths
@@ -27,6 +26,7 @@ func traverse(value reflect.Value, paths PathMap, path string) {
 		// We don't traverse into time objects.
 		if value.Type().Name() == "Time" {
 			paths[path] = value
+			return
 		}
 
 		// Traverse all non-nil fields in the struct, building up their json paths.
@@ -49,9 +49,8 @@ func traverse(value reflect.Value, paths PathMap, path string) {
 			}
 		}
 
-	case reflect.Slice:
+	case reflect.Slice, reflect.Array:
 		// Traverse all elements in the slice.
-		fmt.Println(value)
 		for i := 0; i < value.Len(); i++ {
 			traverse(value.Index(i), paths, path+fmt.Sprintf("[%d]", i))
 		}
@@ -66,47 +65,5 @@ func traverse(value reflect.Value, paths PathMap, path string) {
 	default:
 		// These are all of the other primitive types (e.g. int, float, bool).
 		paths[path] = value
-	}
-}
-
-// compareValues compares 2 reflected values obtained by traversing FHIR resources. The values
-// must be of the same kind to do a comparison. compareValues should only be used to compare values
-// collected by traverse(). Traverse ensures that only primitive go types (strings, bools, ints, etc.)
-// are collected as valid paths for comparison.
-func compareValues(left, right reflect.Value) bool {
-	if left.Kind() != right.Kind() {
-		return false
-	}
-
-	switch left.Kind() {
-	case reflect.String:
-		return left.String() == right.String()
-
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return left.Uint() == right.Uint()
-
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return left.Int() == right.Int()
-
-	case reflect.Float32, reflect.Float64:
-		return left.Float() == right.Float()
-
-	case reflect.Bool:
-		return left.Bool() == right.Bool()
-
-	// This is only for time.Time objects, all other structs should have been traversed.
-	case reflect.Struct:
-		leftTime, ok := left.Interface().(time.Time)
-		if !ok {
-			return false
-		}
-		rightTime, ok := right.Interface().(time.Time)
-		if !ok {
-			return false
-		}
-		return leftTime.Equal(rightTime)
-
-	default:
-		return false
 	}
 }

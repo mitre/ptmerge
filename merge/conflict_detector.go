@@ -2,6 +2,7 @@ package merge
 
 import (
 	"reflect"
+	"time"
 
 	"gopkg.in/mgo.v2/bson"
 
@@ -46,7 +47,7 @@ func (d *Detector) findConflicts(match *Match) (conflict *models.OperationOutcom
 
 	for _, cp := range commonPaths {
 		// Unless the values are EXACTLY the same, we mark them as a conflict.
-		if !compareValues(leftPaths[cp], rightPaths[cp]) {
+		if !d.compareValues(leftPaths[cp], rightPaths[cp]) {
 			locations = append(locations, cp)
 		}
 	}
@@ -61,6 +62,48 @@ func (d *Detector) findConflicts(match *Match) (conflict *models.OperationOutcom
 	}
 	// No conflicts found
 	return nil, nil
+}
+
+// compareValues compares 2 reflected values obtained by traversing FHIR resources. The values
+// must be of the same kind to do a comparison. compareValues should only be used to compare values
+// collected by traverse(). Traverse ensures that only primitive go types (strings, bools, ints, etc.)
+// are collected as valid paths for comparison.
+func (d *Detector) compareValues(left, right reflect.Value) bool {
+	if left.Kind() != right.Kind() {
+		return false
+	}
+
+	switch left.Kind() {
+	case reflect.String:
+		return left.String() == right.String()
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return left.Uint() == right.Uint()
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return left.Int() == right.Int()
+
+	case reflect.Float32, reflect.Float64:
+		return left.Float() == right.Float()
+
+	case reflect.Bool:
+		return left.Bool() == right.Bool()
+
+	// This is only for time.Time objects, all other structs should have been traversed.
+	case reflect.Struct:
+		leftTime, ok := left.Interface().(time.Time)
+		if !ok {
+			return false
+		}
+		rightTime, ok := right.Interface().(time.Time)
+		if !ok {
+			return false
+		}
+		return leftTime.Equal(rightTime)
+
+	default:
+		return false
+	}
 }
 
 func (d *Detector) createConflictOperationOutcome(locations []string) *models.OperationOutcome {
