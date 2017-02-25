@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mitre/ptmerge/testutil"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -15,13 +14,6 @@ type MergeTypesTestSuite struct {
 
 func TestMergeTypesTestSuite(t *testing.T) {
 	suite.Run(t, new(MergeTypesTestSuite))
-}
-
-func (m *MergeTypesTestSuite) TestGetResourceType() {
-	test, err := testutil.LoadFixture("Patient", "../fixtures/patients/foo_bar.json")
-	m.NoError(err)
-	typeAsString := getResourceType(test)
-	m.Equal("Patient", typeAsString)
 }
 
 func (m *MergeTypesTestSuite) TestResourceMapKeys() {
