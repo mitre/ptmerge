@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/intervention-engine/fhir/models"
 )
 
 // traverse recursively iterates through all non-nil fields in a resource, identifying the JSON paths
@@ -19,12 +21,14 @@ func traverse(value reflect.Value, paths PathMap, path string) {
 		if !val.IsValid() {
 			return
 		}
+
 		// Traverse the object that's being pointed to.
 		traverse(val, paths, path)
 
 	case reflect.Struct:
-		// We don't traverse into time objects.
-		if value.Type().Name() == "Time" {
+		// We don't traverse into FHIRDateTime objects.
+		_, ok := value.Interface().(models.FHIRDateTime)
+		if ok {
 			paths[path] = value
 			return
 		}
