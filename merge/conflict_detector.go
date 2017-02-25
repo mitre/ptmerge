@@ -28,7 +28,7 @@ func (d *Detector) Conflicts(match *Match) (targetResource interface{}, conflict
 
 	if len(conflictPaths) > 0 {
 		// Build an OperationOutcome detailing the conflicts.
-		conflict = fhirutil.OperationOutcome(targetID, conflictPaths)
+		conflict = fhirutil.OperationOutcome(fhirutil.GetResourceType(target), targetID, conflictPaths)
 	}
 	return target, conflict
 }

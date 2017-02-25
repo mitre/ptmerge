@@ -79,7 +79,7 @@ func (d *DetectorTestSuite) TestConflicts() {
 	// Validate the OperationOutcome first.
 	d.Len(oo.Issue, 1)
 	d.Len(oo.Issue[0].Location, 4)
-	d.Len(oo.Issue[0].Diagnostics, len(bson.NewObjectId().Hex())) // Contains the conflictID
+	d.Len(oo.Issue[0].Diagnostics, len("Patient:"+bson.NewObjectId().Hex())) // Contains the resourceType and targetResourceID
 
 	expected := []string{"id", "gender", "birthDate", "name[0].given[0]"}
 	for _, x := range expected {
