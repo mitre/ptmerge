@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/intervention-engine/fhir/models"
-	"github.com/mitre/ptmerge/testutil"
+	"github.com/mitre/ptmerge/fhirutil"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -49,7 +49,7 @@ func (m *MatcherTestSuite) TestMatchBundlesNoMatch() {
 // ========================================================================= //
 
 func (m *MatcherTestSuite) TestCollectResources() {
-	fix, err := testutil.LoadFixture("Bundle", "../fixtures/clint_abbot_bundle.json")
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/clint_abbot_bundle.json")
 	m.NoError(err)
 	m.NotNil(fix)
 	bundle, ok := fix.(*models.Bundle)
@@ -66,7 +66,7 @@ func (m *MatcherTestSuite) TestCollectResources() {
 }
 
 func (m *MatcherTestSuite) TestTraverseResources() {
-	fix, err := testutil.LoadFixture("Bundle", "../fixtures/clint_abbot_bundle.json")
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/clint_abbot_bundle.json")
 	m.NoError(err)
 	m.NotNil(fix)
 	bundle, ok := fix.(*models.Bundle)
@@ -313,10 +313,10 @@ func (m *MatcherTestSuite) TestMultipleMatchesOrderOfPreference() {
 // ========================================================================= //
 
 func (m *MatcherTestSuite) TestComparePathsMatchAboveThreshold() {
-	fix1, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnston_patient.json")
+	fix1, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnston_patient.json")
 	m.NoError(err)
 
-	fix2, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnson_patient.json")
+	fix2, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnson_patient.json")
 	m.NoError(err)
 
 	// Build paths for each patient.
@@ -327,10 +327,10 @@ func (m *MatcherTestSuite) TestComparePathsMatchAboveThreshold() {
 }
 
 func (m *MatcherTestSuite) TestComparePathsNoMatchBelowThreshold() {
-	fix1, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnston_patient.json")
+	fix1, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnston_patient.json")
 	m.NoError(err)
 
-	fix2, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
+	fix2, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
 	m.NoError(err)
 
 	// Build paths for each patient.
@@ -341,10 +341,10 @@ func (m *MatcherTestSuite) TestComparePathsNoMatchBelowThreshold() {
 }
 
 func (m *MatcherTestSuite) TestComparePathsMatchLowThresholdNoMatchHighThreshold() {
-	fix1, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnston_patient.json")
+	fix1, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnston_patient.json")
 	m.NoError(err)
 
-	fix2, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
+	fix2, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
 	m.NoError(err)
 
 	matcher := new(Matcher)
@@ -423,12 +423,21 @@ func (m *MatcherTestSuite) TestMatchTimeValues() {
 	matcher := new(Matcher)
 
 	t := time.Now().UTC()
-	t1 := reflect.ValueOf(t)
-	t2 := reflect.ValueOf(t)
-	m.True(matcher.matchValues(t1, t2))
+	t1 := models.FHIRDateTime{
+		Time:      t,
+		Precision: models.Timestamp,
+	}
+	t2 := models.FHIRDateTime{
+		Time:      t,
+		Precision: models.Timestamp,
+	}
+	m.True(matcher.matchValues(reflect.ValueOf(t1), reflect.ValueOf(t2)))
 
-	t3 := reflect.ValueOf(time.Now().UTC())
-	m.True(matcher.matchValues(t1, t3))
+	t3 := models.FHIRDateTime{
+		Time:      time.Now().UTC(),
+		Precision: models.Timestamp,
+	}
+	m.True(matcher.matchValues(reflect.ValueOf(t1), reflect.ValueOf(t3)))
 }
 
 func (m *MatcherTestSuite) TestMatchDifferentKindsAlwaysFalse() {
@@ -462,17 +471,32 @@ func (m *MatcherTestSuite) TestFuzzyFloatMatch() {
 
 func (m *MatcherTestSuite) TestFuzzyTimeMatchUTC() {
 	// Same day, different time of day.
-	t1 := time.Date(2017, 2, 10, 4, 13, 54, 0, time.UTC)
-	t2 := time.Date(2017, 2, 10, 13, 24, 11, 0, time.UTC)
+	t1 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 10, 4, 13, 54, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
+	t2 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 10, 13, 24, 11, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
 	m.True(fuzzyTimeMatch(t1, t2))
 
 	// Different days should fail.
-	t3 := time.Date(2017, 2, 9, 6, 45, 33, 0, time.UTC)
+	t3 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 9, 6, 45, 33, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
 	m.False(fuzzyTimeMatch(t1, t3))
 
 	// The extremes of a callendar day should still match.
-	t4 := time.Date(2017, 1, 31, 0, 0, 0, 0, time.UTC)
-	t5 := time.Date(2017, 1, 31, 23, 59, 59, 0, time.UTC)
+	t4 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 0, 0, 0, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
+	t5 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 23, 59, 59, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
 	m.True(fuzzyTimeMatch(t4, t5))
 }
 
@@ -481,20 +505,38 @@ func (m *MatcherTestSuite) TestFuzzyTimeMatchEST() {
 	m.NoError(err)
 
 	// Same day, different time of day.
-	t1 := time.Date(2017, 2, 10, 4, 13, 54, 0, loc)
-	t2 := time.Date(2017, 2, 10, 13, 24, 11, 0, loc)
+	t1 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 10, 4, 13, 54, 0, loc),
+		Precision: models.Timestamp,
+	}
+	t2 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 10, 13, 24, 11, 0, loc),
+		Precision: models.Timestamp,
+	}
 	m.True(fuzzyTimeMatch(t1, t2))
 
 	// Different days should fail.
-	t3 := time.Date(2017, 2, 9, 6, 45, 33, 0, loc)
+	t3 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 9, 6, 45, 33, 0, loc),
+		Precision: models.Timestamp,
+	}
 	m.False(fuzzyTimeMatch(t1, t3))
 
 	// The extremes of a callendar day should still match.
-	t4 := time.Date(2017, 1, 31, 0, 0, 0, 0, loc)
-	t5 := time.Date(2017, 1, 31, 23, 59, 59, 0, loc)
+	t4 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 0, 0, 0, 0, loc),
+		Precision: models.Timestamp,
+	}
+	t5 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 23, 59, 59, 0, loc),
+		Precision: models.Timestamp,
+	}
 	m.True(fuzzyTimeMatch(t4, t5))
 
 	// Cannot reliably match times from different locations.
-	t6 := time.Date(2017, 1, 31, 4, 15, 32, 0, time.UTC)
+	t6 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 4, 15, 32, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
 	m.False(fuzzyTimeMatch(t4, t6))
 }
