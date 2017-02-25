@@ -25,7 +25,7 @@ type MergeState struct {
 
 // ConflictMap is a map containing one or more ConflictStates. The key to each
 // ConflictState is that conflict's ID.
-type ConflictMap map[string]ConflictState
+type ConflictMap map[string]*ConflictState
 
 // Keys returns all keys (conflict IDs) in the map.
 func (c ConflictMap) Keys() []string {
@@ -36,6 +36,28 @@ func (c ConflictMap) Keys() []string {
 		i++
 	}
 	return keys
+}
+
+// RemainingConflicts returns a slice of IDs for the remaining unresolved conflicts.
+func (c ConflictMap) RemainingConflicts() []string {
+	remaining := []string{}
+	for k := range c {
+		if !c[k].Resolved {
+			remaining = append(remaining, k)
+		}
+	}
+	return remaining
+}
+
+// ResolvedConflicts returns a slice of IDs for the resolved conflicts.
+func (c ConflictMap) ResolvedConflicts() []string {
+	resolved := []string{}
+	for k := range c {
+		if c[k].Resolved {
+			resolved = append(resolved, k)
+		}
+	}
+	return resolved
 }
 
 // ConflictState represents the current state of a single merge conflict as it is
