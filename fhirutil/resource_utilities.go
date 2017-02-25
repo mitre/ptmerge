@@ -205,7 +205,7 @@ func DeleteResource(host, resourceType, resourceID string) error {
 
 // OperationOutcome creates a new OperatioOutcome detailing all conflicts
 // in the target resource, identified by its targetResourceID.
-func OperationOutcome(targetResourceID string, conflictPaths []string) (oo *models.OperationOutcome) {
+func OperationOutcome(targetResourceType, targetResourceID string, conflictPaths []string) (oo *models.OperationOutcome) {
 	oo = &models.OperationOutcome{
 		DomainResource: models.DomainResource{
 			Resource: models.Resource{
@@ -217,8 +217,8 @@ func OperationOutcome(targetResourceID string, conflictPaths []string) (oo *mode
 			models.OperationOutcomeIssueComponent{
 				Severity: "information",
 				Code:     "conflict",
-				// The targetResourceID is stored as additional diagnostic information.
-				Diagnostics: targetResourceID,
+				// The target resource type and ID are stored as additional diagnostic information.
+				Diagnostics: targetResourceType + ":" + targetResourceID,
 				// Paths in the resource with conflicts, as a JSON path rather than XPath.
 				Location: conflictPaths,
 			},
