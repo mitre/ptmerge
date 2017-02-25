@@ -18,22 +18,14 @@ type Merge struct {
 // This is stored in the "merges" collection.
 type MergeState struct {
 	MergeID   string      `bson:"_id,omitempty" json:"id,omitempty"`
-	Completed bool        `bson:"completed" json:"completed"`
-	TargetURL string      `bson:"target" json:"target"`
+	TargetURL string      `bson:"targetBundle,omitempty" json:"targetBundle,omitempty"`
 	Conflicts ConflictMap `bson:"conflicts,omitempty" json:"conflicts,omitempty"`
-}
-
-// ConflictState represents the current state of a single merge conflict as it is
-// store in mongo. This is embedded in the MergeState object as a ConflictMap.
-type ConflictState struct {
-	URL      string `bson:"url" json:"url"`
-	Resolved bool   `bson:"resolved" json:"resolved"`
-	Deleted  bool   `bson:"deleted" json:"deleted"`
+	Completed bool        `bson:"completed" json:"completed"`
 }
 
 // ConflictMap is a map containing one or more ConflictStates. The key to each
 // ConflictState is that conflict's ID.
-type ConflictMap map[string]*ConflictState
+type ConflictMap map[string]ConflictState
 
 // Keys returns all keys (conflict IDs) in the map.
 func (c ConflictMap) Keys() []string {
@@ -44,4 +36,18 @@ func (c ConflictMap) Keys() []string {
 		i++
 	}
 	return keys
+}
+
+// ConflictState represents the current state of a single merge conflict as it is
+// store in mongo. This is embedded in the MergeState object as a ConflictMap.
+type ConflictState struct {
+	OperationOutcomeURL string         `bson:"operationOutcome,omitempty" json:"operationOutcome,omitempty"`
+	TargetResource      TargetResource `bson:"targetResource,omitempty" json:"targetResource,omitempty"`
+	Resolved            bool           `bson:"resolved" json:"resolved"`
+}
+
+// TargetResource represents a single resource in a target bundle.
+type TargetResource struct {
+	ResourceID   string `bson:"id" json:"id"`
+	ResourceType string `bson:"type" json:"type"`
 }

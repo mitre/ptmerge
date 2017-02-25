@@ -17,17 +17,17 @@ func TestStateTestSuite(t *testing.T) {
 
 func (m *StateTestSuite) TestConflictKeys() {
 	conflicts := make(ConflictMap)
-	conflicts["foo"] = &ConflictState{
-		URL:      "foo",
-		Resolved: true,
+	conflicts["foo"] = ConflictState{
+		OperationOutcomeURL: "foo",
+		Resolved:            true,
 	}
-	conflicts["bar"] = &ConflictState{
-		URL:      "bar",
-		Resolved: true,
+	conflicts["bar"] = ConflictState{
+		OperationOutcomeURL: "bar",
+		Resolved:            true,
 	}
-	conflicts["hey"] = &ConflictState{
-		URL:      "hey",
-		Resolved: true,
+	conflicts["hey"] = ConflictState{
+		OperationOutcomeURL: "hey",
+		Resolved:            true,
 	}
 
 	expected := []string{"foo", "bar", "hey"} // Not necessarily in this order
