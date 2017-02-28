@@ -3,7 +3,7 @@ A service for merging two FHIR based patient records.
 
 ## Environment
 
-This project currently uses Go 1.7 and is built using the Go toolchain.
+This project currently uses Go 1.8 and is built using the Go toolchain.
 
 To install Go, follow the instructions found at the [Go Website](http://golang.org/doc/install).
 
