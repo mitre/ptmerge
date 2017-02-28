@@ -92,6 +92,7 @@ func (d *DetectorTestSuite) TestConflicts() {
 	left, ok := match.Left.(*models.Patient)
 	d.True(ok)
 
+	d.NotEmpty(targetPatient.Id)
 	d.Equal(left.Gender, targetPatient.Gender)
 	d.Equal(left.Name[0].Given[0], targetPatient.Name[0].Given[0])
 	d.Equal(left.Name[0].Family, targetPatient.Name[0].Family)

@@ -13,7 +13,7 @@ import (
 var (
 	// PathsUnsuitableForComparison are paths that don't offer meaningful comparison
 	// between two resources. For example, URLs or code systems.
-	PathsUnsuitableForComparison = []string{"url", "system", "id", "_id", "text"}
+	PathsUnsuitableForComparison = []string{"url", "system", "id", "_id", "text", "reference"}
 
 	// FloatTolerance identifies the minumum difference between 2 floats that still
 	// allows them to be considered a match.
@@ -82,7 +82,6 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 // Collects all resources in a bundle into structs that match their resource types.
 func (m *Matcher) collectResources(bundle *models.Bundle) (resources ResourceMap, err error) {
 	resources = make(ResourceMap)
-
 	for _, entry := range bundle.Entry {
 		// Get the entry.Resource's type.
 		resourceType := fhirutil.GetResourceType(entry.Resource)
@@ -276,20 +275,16 @@ func fuzzyFloatMatch(leftFloat, rightFloat float64) bool {
 }
 
 func fuzzyTimeMatch(leftTime, rightTime models.FHIRDateTime) bool {
-	// Check the the times both use the same location.
+	// Check that the times both use the same location.
 	if leftTime.Time.Location() != rightTime.Time.Location() {
-		return false
-	}
-
-	// And the same precision.
-	if leftTime.Precision != rightTime.Precision {
-		return false
+		// If they don't, force them to UTC.
+		leftTime.Time = leftTime.Time.UTC()
+		rightTime.Time = rightTime.Time.UTC()
 	}
 
 	// Timestamps are a "match" if they occur on the same calendar day.
 	leftY, leftM, leftD := leftTime.Time.Date()
 	rightY, rightM, rightD := rightTime.Time.Date()
-
 	return ((leftY == rightY) && (leftM == rightM) && (leftD == rightD))
 }
 

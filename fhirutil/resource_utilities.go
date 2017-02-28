@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
-	"strings"
 
 	"github.com/intervention-engine/fhir/models"
 	"gopkg.in/mgo.v2/bson"
@@ -25,14 +24,11 @@ func SetResourceID(resource interface{}, newID string) {
 
 // GetResourceType returns the string equivalent of a FHIR resource type.
 func GetResourceType(resource interface{}) string {
-	// For example, "*models.Patient"
-	typeWithPackage := reflect.TypeOf(resource).String()
-	// So split that part out.
-	parts := strings.Split(typeWithPackage, ".")
-	if len(parts) != 2 {
-		return ""
+	val := reflect.ValueOf(resource)
+	if val.Kind() == reflect.Ptr || val.Kind() == reflect.Interface {
+		return val.Elem().FieldByName("ResourceType").String()
 	}
-	return parts[1]
+	return ""
 }
 
 // GetResourceByURL GETs a FHIR resource from it's specified URL.
@@ -102,7 +98,7 @@ func PostResource(host, resourceType string, resource interface{}) (created inte
 		return nil, err
 	}
 
-	res, err := http.Post(host+"/"+resourceType, "application/fhir+json", bytes.NewReader(data))
+	res, err := http.Post(host+"/"+resourceType, "application/fhir+json", bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}
@@ -112,12 +108,10 @@ func PostResource(host, resourceType string, resource interface{}) (created inte
 		return nil, fmt.Errorf("Failed to create resource %s", resourceType)
 	}
 
-	// Unmarshal the body and return the newly created resource.
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
-
 	created = models.NewStructForResourceName(resourceType)
 	err = json.Unmarshal(body, &created)
 	if err != nil {

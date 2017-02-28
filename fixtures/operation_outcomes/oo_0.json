@@ -1,0 +1,10 @@
+{
+  "resourceType": "OperationOutcome",
+  "id": "58b4265297bba9116152c7a2",
+  "issue": [{
+    "severity": "information",
+    "code": "informational",
+    "diagnostics": "Patient:58b4265297bba9116152c7a3",
+    "location": ["foo.bar[0].x"]
+  }]
+}

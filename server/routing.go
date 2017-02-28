@@ -13,10 +13,7 @@ func RegisterRoutes(router *gin.Engine, session *mgo.Session, dbname string, fhi
 	// Merging and confict resolution.
 	router.POST("/merge", mc.Merge)
 	router.POST("/merge/:merge_id/resolve/:conflict_id", mc.Resolve)
-
-	// Abort or delete a merge. Abort is just an alias for delete.
 	router.POST("/merge/:merge_id/abort", mc.DeleteMerge)
-	router.DELETE("/merge/:merge_id", mc.DeleteMerge)
 
 	// Convenience routes.
 	router.GET("/merge", mc.AllMerges)

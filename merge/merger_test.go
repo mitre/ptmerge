@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/intervention-engine/fhir/models"
 	"github.com/intervention-engine/fhir/server"
+	"github.com/mitre/ptmerge/fhirutil"
 	"github.com/mitre/ptmerge/testutil"
 	"github.com/stretchr/testify/suite"
 )
@@ -47,8 +49,106 @@ func (m *MergerTestSuite) TearDownTest() {
 // TEST MERGE                                                                //
 // ========================================================================= //
 
-func (m *MergerTestSuite) TestMerge() {
+func (m *MergerTestSuite) TestMergePerfectMatch() {
+	var err error
 
+	// Two identical bundles should result in a merge without conflicts, just returning
+	// the merged bundle.
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	created, err := fhirutil.PostResource(m.FHIRServer.URL, "Bundle", fix)
+	leftBundle, ok := created.(*models.Bundle)
+	m.True(ok)
+
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	created, err = fhirutil.PostResource(m.FHIRServer.URL, "Bundle", fix)
+	rightBundle, ok := created.(*models.Bundle)
+	m.True(ok)
+
+	merger := NewMerger(m.FHIRServer.URL)
+	source1 := m.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := m.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	outcome, targetURL, err := merger.Merge(source1, source2)
+	m.NoError(err)
+	m.NotNil(outcome)
+	m.Empty(targetURL) // No target was created
+
+	// The outcome should be a bundle containing the merged resources.
+	m.Len(outcome.Entry, 7)
+}
+
+func (m *MergerTestSuite) TestMergePartialMatch() {
+	// The outcome should be a set of conflicts.
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	created, err := fhirutil.PostResource(m.FHIRServer.URL, "Bundle", fix)
+	leftBundle, ok := created.(*models.Bundle)
+	m.True(ok)
+
+	fix2, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	m.NoError(err)
+	created2, err := fhirutil.PostResource(m.FHIRServer.URL, "Bundle", fix2)
+	rightBundle, ok := created2.(*models.Bundle)
+	m.True(ok)
+
+	merger := NewMerger(m.FHIRServer.URL)
+	source1 := m.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := m.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+
+	outcome, targetURL, err := merger.Merge(source1, source2)
+	m.NoError(err)
+	m.NotNil(outcome)
+	m.NotEmpty(targetURL)
+
+	// Check that the target bundle exists and contains the expected resources.
+	target, err := fhirutil.GetResourceByURL("Bundle", targetURL)
+	m.NoError(err)
+	targetBundle, ok := target.(*models.Bundle)
+	m.True(ok)
+	m.Len(targetBundle.Entry, 7)
+
+	// There should be one Patient.
+	pcount := 0
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "Patient" {
+			pcount++
+		}
+	}
+	m.Equal(1, pcount)
+
+	// There should also be 2 Encounters.
+	ecount := 0
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "Encounter" {
+			ecount++
+		}
+	}
+	m.Equal(2, ecount)
+
+	// And 1 Procedure.
+	pcount = 0
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "Procedure" {
+			pcount++
+		}
+	}
+	m.Equal(1, pcount)
+
+	// And 2 MedicationStatements.
+	mcount := 0
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "MedicationStatement" {
+			mcount++
+		}
+	}
+	m.Equal(2, mcount)
+
+	// TODO: Validate the bundle of operation outcomes.
+}
+
+func (m *MergerTestSuite) TestMergePoorMatch() {
+	m.T().Skip()
 }
 
 // ========================================================================= //
@@ -56,5 +156,5 @@ func (m *MergerTestSuite) TestMerge() {
 // ========================================================================= //
 
 func (m *MergerTestSuite) TestResolveConflict() {
-
+	m.T().Skip()
 }
