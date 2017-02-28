@@ -302,5 +302,64 @@ func (m *MergerTestSuite) TestGodawfulMatch() {
 // ========================================================================= //
 
 func (m *MergerTestSuite) TestResolveConflict() {
-	m.T().Skip()
+	// Setup a merge with unresolved conflicts. These are the same fixtures and
+	// same scenario as TestMergePartialMatch().
+	created, err := fhirutil.LoadAndPostResource(m.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	m.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(m.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	m.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	m.True(ok)
+
+	merger := NewMerger(m.FHIRServer.URL)
+	source1 := m.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := m.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+
+	outcome, targetURL, err := merger.Merge(source1, source2)
+	m.NoError(err)
+	m.NotNil(outcome)
+	m.NotEmpty(targetURL)
+
+	// Get the diagnostic info from the Patient conflict
+	found := false
+	var targetPatientID string
+	for _, entry := range outcome.Entry {
+		oo, ok := entry.Resource.(*models.OperationOutcome)
+		m.True(ok)
+		m.Len(oo.Issue, 1)
+		if strings.Contains(oo.Issue[0].Diagnostics, "Patient") {
+			found = true
+			parts := strings.SplitN(oo.Issue[0].Diagnostics, ":", 2)
+			targetPatientID = parts[1]
+		}
+	}
+	m.True(found)
+	m.NotEmpty(targetPatientID)
+
+	patientResource, err := fhirutil.LoadResource("Patient", "../fixtures/patients/lowell_abbott.json")
+	err = merger.ResolveConflict(targetURL, targetPatientID, patientResource)
+	m.NoError(err)
+
+	// Get the bundle and check that it was updated.
+	target, err := fhirutil.GetResourceByURL("Bundle", targetURL)
+	m.NoError(err)
+	targetBundle, ok := target.(*models.Bundle)
+	m.True(ok)
+
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceID(entry.Resource) == targetPatientID {
+			postedPatient, ok := patientResource.(*models.Patient)
+			m.True(ok)
+			targetPatient, ok := entry.Resource.(*models.Patient)
+			m.True(ok)
+			m.Equal(postedPatient.Name, targetPatient.Name)
+			m.Equal(postedPatient.Telecom, targetPatient.Telecom)
+			m.Equal(postedPatient.BirthDate, targetPatient.BirthDate)
+			m.Equal(postedPatient.MaritalStatus, targetPatient.MaritalStatus)
+			break
+		}
+	}
 }
