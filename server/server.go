@@ -21,11 +21,11 @@ type PTMergeServer struct {
 
 // NewServer returns a newly initialized PTMergeServer.
 func NewServer(fhirhost, dbhost, dbname string, debug bool) *PTMergeServer {
-	// if debug {
-	// 	gin.SetMode(gin.DebugMode)
-	// } else {
-	// 	gin.SetMode(gin.ReleaseMode)
-	// }
+	if debug {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
 	return &PTMergeServer{
 		Engine:       gin.Default(), // includes the default logging and recovery middleware
