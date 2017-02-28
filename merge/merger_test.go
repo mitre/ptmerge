@@ -80,15 +80,13 @@ func (m *MergerTestSuite) TestMergePerfectMatch() {
 
 func (m *MergerTestSuite) TestMergePartialMatch() {
 	// The outcome should be a set of conflicts.
-	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	created, err := fhirutil.LoadAndPostResource(m.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
 	m.NoError(err)
-	created, err := fhirutil.PostResource(m.FHIRServer.URL, "Bundle", fix)
 	leftBundle, ok := created.(*models.Bundle)
 	m.True(ok)
 
-	fix2, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	created2, err := fhirutil.LoadAndPostResource(m.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
 	m.NoError(err)
-	created2, err := fhirutil.PostResource(m.FHIRServer.URL, "Bundle", fix2)
 	rightBundle, ok := created2.(*models.Bundle)
 	m.True(ok)
 

@@ -302,14 +302,12 @@ func (s *ServerTestSuite) TestAbortMerge() {
 	var err error
 
 	// Put a target bundle and a conflict on the host FHIR server.
-	fix, err := fhirutil.LoadResource("OperationOutcome", "../fixtures/operation_outcomes/oo_0.json")
-	resource, err := fhirutil.PostResource(s.FHIRServer.URL, "OperationOutcome", fix)
+	resource, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "OperationOutcome", "../fixtures/operation_outcomes/oo_0.json")
 	s.NoError(err)
 	conflict, ok := resource.(*models.OperationOutcome)
 	s.True(ok)
 
-	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/john_peters_bundle.json")
-	resource, err = fhirutil.PostResource(s.FHIRServer.URL, "Bundle", fix)
+	resource, err = fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/joey_chestnut_bundle.json")
 	s.NoError(err)
 	target, ok := resource.(*models.Bundle)
 	s.True(ok)
@@ -1007,9 +1005,7 @@ func (s *ServerTestSuite) TestGetResolvedConflictsMergeNotFound() {
 
 func (s *ServerTestSuite) TestGetMergeTarget() {
 	// Create a target bundle.
-	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
-	s.NoError(err)
-	created, err := fhirutil.PostResource(s.FHIRServer.URL, "Bundle", fix)
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
 	s.NoError(err)
 	target, ok := created.(*models.Bundle)
 	s.True(ok)

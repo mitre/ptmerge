@@ -207,3 +207,11 @@ func (f *FHIRUtilTestSuite) TestLoadResource() {
 	f.Equal("Foo", patient.Name[0].Given[0])
 	f.Equal("Bar", patient.Name[0].Family)
 }
+
+func (f *FHIRUtilTestSuite) TestLoadAndPostResource() {
+	created, err := LoadAndPostResource(f.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	f.NoError(err)
+	bundle, ok := created.(*models.Bundle)
+	f.True(ok)
+	f.Len(bundle.Entry, 7)
+}

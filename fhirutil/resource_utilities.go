@@ -276,6 +276,9 @@ func ResponseBundle(statusCode string, resources []interface{}) (bundle *models.
 // LoadResource returns a resource-appropriate struct for the unmarshaled file.
 func LoadResource(resourceType, filepath string) (resource interface{}, err error) {
 	data, err := ioutil.ReadFile(filepath)
+	if err != nil {
+		return nil, err
+	}
 	resource = models.NewStructForResourceName(resourceType)
 	if resource == nil {
 		return nil, fmt.Errorf("Unknown resource type '%s'", resourceType)
@@ -285,4 +288,33 @@ func LoadResource(resourceType, filepath string) (resource interface{}, err erro
 		return nil, err
 	}
 	return resource, nil
+}
+
+// LoadAndPostResource loads a resource from a fixture and immediately POSTs it,
+// returning the resource that was created.
+func LoadAndPostResource(host, resourceType, filepath string) (created interface{}, err error) {
+	data, err := ioutil.ReadFile(filepath)
+	if err != nil {
+		return nil, err
+	}
+	res, err := http.Post(host+"/"+resourceType, "application/fhir+json", bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("Failed to create resource %s", resourceType)
+	}
+
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	created = models.NewStructForResourceName(resourceType)
+	err = json.Unmarshal(body, &created)
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
 }
