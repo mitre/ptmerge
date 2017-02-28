@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -51,6 +52,12 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 	leftUnmatchableResourceTypes := setDiff(leftResources.Keys(), rightResources.Keys())  // L not in R
 	rightUnmatchableResourceTypes := setDiff(rightResources.Keys(), leftResources.Keys()) // R not in L
 
+	// If the Patient resource is not in matchableResourceTypes, return an error.
+	// Minimally we need a single, matching Patient object to perform a merge.
+	if !contains(matchableResourceTypes, "Patient") {
+		return nil, nil, errors.New("Patient resource not found in one or both bundles")
+	}
+
 	// Handle all of the unmatchable resource types.
 	for _, key := range leftUnmatchableResourceTypes {
 		unmatchables = append(unmatchables, leftResources[key]...)
@@ -73,6 +80,12 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 		if err != nil {
 			return nil, nil, err
 		}
+
+		if resourceType == "Patient" && len(someMatches) == 0 {
+			// There was no matching Patient resource.
+			return nil, nil, errors.New("Patient resource(s) do not match")
+		}
+
 		matches = append(matches, someMatches...)
 		unmatchables = append(unmatchables, someUnmatchables...)
 	}
