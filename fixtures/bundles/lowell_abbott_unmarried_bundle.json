@@ -1,0 +1,162 @@
+{
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+        {
+            "resource": {
+                "resourceType": "Patient",
+                "id": "58a4904e97bba945de21eac8",
+                "name": [
+                    {
+                        "given": ["Lowell"],
+                        "family": "Abbott"
+                    }
+                ],
+                "gender": "male",
+                "birthDate": "1950-09-02",
+                "maritalStatus": {
+                    "coding": [
+                        {
+                            "system": "http://hl7.org/fhir/v3/MaritalStatus",
+                            "code": "S",
+                            "display": "Never Married"
+                        }
+                    ]
+                },
+                "address": [
+                    {
+                        "use": "home",
+                        "line": ["1 MITRE Way"],
+                        "city": "Bedford",
+                        "state": "MA",
+                        "postal": "02144"
+                    }
+                ],
+                "telecom": [
+                    {
+                        "system": "phone",
+                        "value": "215.449.5403 x04021",
+                        "use": "home"
+                    }
+                ]
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Condition",
+                "id": "58a4904e07bca945de21eac8",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "44054006",
+                            "display": "Diabetes"
+                        }
+                    ]
+                },
+                "onsetDateTime": "2016-11-01",
+                "subject": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Encounter",
+                "id": "58a4904e97bba945ee21eac8",
+                "status": "finished",
+                "period": {
+                    "start": "2016-11-01",
+                    "end": "2016-11-01"
+                },
+                "class": {
+                    "code": "outpatient"
+                },
+                "type": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://snomed.info/sct",
+                                "code": "185349003",
+                                "display": "Encounter for problem"
+                            }
+                        ]
+                    }
+                ],
+                "patient": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Encounter",
+                "id": "58a4904e97bba945de21eac0",
+                "status": "finished",
+                "period": {
+                    "start": "2014-03-15T16:09:32-05:00",
+                    "end": "2014-03-15T17:11:41-05:00"
+                },
+                "class": {
+                    "code": "outpatient"
+                },
+                "type": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://snomed.info/sct",
+                                "code": "185349003",
+                                "display": "Encounter for problem"
+                            }
+                        ]
+                    }
+                ],
+                "patient": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "MedicationStatement",
+                "id": "58a4904e97bba945de21fac0",
+                "status": "active",
+                "medicationCodeableConcept": {
+                    "coding": [
+                        {
+                            "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                            "code": "860975",
+                            "display": "24 HR Metformin hydrochloride 500 MG Extended Release Oral Tablet"
+                        }
+                    ]
+                },
+                "subject": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                },
+                "effectivePeriod": {
+                    "start": "2016-11-01"
+                }
+            }
+				},
+        {
+            "resource": {
+                "resourceType": "Procedure",
+                "id": "58a4904e98bba945de21eac0",
+                "status": "completed",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "16254007",
+                            "display": "Lipid panel"
+                        }
+                    ]
+                },
+                "subject": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                },
+                "performedDateTime": "2016-11-01"
+            }
+        }
+    ]
+}

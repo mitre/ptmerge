@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/mgo.v2/bson"
+
+	"github.com/intervention-engine/fhir/models"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -16,11 +19,154 @@ func TestDetectorTestSuite(t *testing.T) {
 	suite.Run(t, new(DetectorTestSuite))
 }
 
+// ========================================================================= //
+// TEST CONFLICTS                                                            //
+// ========================================================================= //
+
+func (d *DetectorTestSuite) TestConflicts() {
+
+	// We expect these to conflict by first name, Gender, ID, and BirthDate.
+	tz, err := time.LoadLocation("America/New_York")
+	d.NoError(err)
+
+	match := &Match{
+		ResourceType: "Patient",
+		Left: &models.Patient{
+			DomainResource: models.DomainResource{
+				Resource: models.Resource{
+					Id:           bson.NewObjectId().Hex(),
+					ResourceType: "Patient",
+				},
+			},
+			Gender: "Male",
+			Name: []models.HumanName{
+				models.HumanName{
+					Family: "Smith",
+					Given:  []string{"John"},
+				},
+			},
+			BirthDate: &models.FHIRDateTime{
+				Time:      time.Date(1976, 12, 2, 0, 0, 0, 0, tz),
+				Precision: models.Date,
+			},
+		},
+		Right: &models.Patient{
+			DomainResource: models.DomainResource{
+				Resource: models.Resource{
+					Id:           bson.NewObjectId().Hex(),
+					ResourceType: "Patient",
+				},
+			},
+			Gender: "Female",
+			Name: []models.HumanName{
+				models.HumanName{
+					Family: "Smith",
+					Given:  []string{"Jane"},
+				},
+			},
+			BirthDate: &models.FHIRDateTime{
+				Time:      time.Date(1976, 11, 1, 0, 0, 0, 0, tz),
+				Precision: models.Date,
+			},
+		},
+	}
+
+	detector := new(Detector)
+	targetResource, oo := detector.Conflicts(match)
+	d.NotNil(oo)
+	d.NotNil(targetResource)
+
+	// Validate the OperationOutcome first.
+	d.Len(oo.Issue, 1)
+	d.Len(oo.Issue[0].Location, 4)
+	d.Len(oo.Issue[0].Diagnostics, len("Patient:"+bson.NewObjectId().Hex())) // Contains the resourceType and targetResourceID
+
+	expected := []string{"id", "gender", "birthDate", "name[0].given[0]"}
+	for _, x := range expected {
+		d.True(contains(oo.Issue[0].Location, x))
+	}
+
+	// Validate the target resource. Should be the same as the left.
+	targetPatient, ok := targetResource.(*models.Patient)
+	d.True(ok)
+	left, ok := match.Left.(*models.Patient)
+	d.True(ok)
+
+	d.NotEmpty(targetPatient.Id)
+	d.Equal(left.Gender, targetPatient.Gender)
+	d.Equal(left.Name[0].Given[0], targetPatient.Name[0].Given[0])
+	d.Equal(left.Name[0].Family, targetPatient.Name[0].Family)
+	d.True(left.BirthDate.Time.Equal(targetPatient.BirthDate.Time))
+}
+
+// ========================================================================= //
+// TEST FIND CONFLICT PATHS                                                  //
+// ========================================================================= //
+
+func (d *DetectorTestSuite) TestFindConflictsPatientResource() {
+
+	match := &Match{
+		ResourceType: "Patient",
+		Left: &models.Patient{
+			DomainResource: models.DomainResource{
+				Resource: models.Resource{
+					Id:           bson.NewObjectId().Hex(),
+					ResourceType: "Patient",
+				},
+			},
+			Gender: "Male",
+			Name: []models.HumanName{
+				models.HumanName{
+					Family: "Smith",
+					Given:  []string{"John"},
+				},
+			},
+			BirthDate: &models.FHIRDateTime{
+				Time:      time.Date(1976, time.December, 2, 0, 0, 0, 0, time.UTC),
+				Precision: models.Date,
+			},
+		},
+		Right: &models.Patient{
+			DomainResource: models.DomainResource{
+				Resource: models.Resource{
+					Id:           bson.NewObjectId().Hex(),
+					ResourceType: "Patient",
+				},
+			},
+			Gender: "Female",
+			Name: []models.HumanName{
+				models.HumanName{
+					Family: "Smith",
+					Given:  []string{"Jane"},
+				},
+			},
+			BirthDate: &models.FHIRDateTime{
+				Time:      time.Date(1976, time.November, 1, 0, 0, 0, 0, time.UTC),
+				Precision: models.Date,
+			},
+		},
+	}
+
+	detector := new(Detector)
+	conflicts := detector.findConflictPaths(match)
+
+	expected := []string{
+		"id",
+		"gender",
+		"name[0].given[0]",
+		"birthDate",
+	}
+	d.Len(conflicts, 4)
+	for _, p := range expected {
+		d.True(contains(conflicts, p))
+	}
+}
+
 type BarType struct {
-	A string    `json:"a,omitempty"`
-	B *uint32   `json:"b,omitempty"`
-	C time.Time `json:"c,omitempty"`
-	D *BazType  `json:"d,omitempty"`
+	A string               `json:"a,omitempty"`
+	B *uint32              `json:"b,omitempty"`
+	C *models.FHIRDateTime `json:"c,omitempty"`
+	D *BazType             `json:"d,omitempty"`
 }
 
 type BazType struct {
@@ -28,23 +174,26 @@ type BazType struct {
 	Y *bool  `json:"y,omitempty"`
 }
 
-// ========================================================================= //
-// TEST CONFLICT DETECTION                                                   //
-// ========================================================================= //
-
-func (d *DetectorTestSuite) TestPerfectMatchNoConflicts() {
+func (d *DetectorTestSuite) TestFindConflictsNoConflicts() {
 	leftNum := uint32(1)
 	rightNum := uint32(1)
 	leftBool := false
 	rightBool := false
-	t := time.Now().UTC()
+	t1 := &models.FHIRDateTime{
+		Time:      time.Date(1845, 6, 4, 12, 33, 0, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
+	t2 := &models.FHIRDateTime{
+		Time:      time.Date(1845, 6, 4, 12, 33, 0, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
 
 	match := &Match{
 		ResourceType: "BarType",
 		Left: &BarType{
 			A: "A",
 			B: &leftNum,
-			C: t,
+			C: t1,
 			D: &BazType{
 				X: "X",
 				Y: &leftBool,
@@ -53,7 +202,7 @@ func (d *DetectorTestSuite) TestPerfectMatchNoConflicts() {
 		Right: &BarType{
 			A: "A",
 			B: &rightNum,
-			C: t,
+			C: t2,
 			D: &BazType{
 				X: "X",
 				Y: &rightBool,
@@ -62,26 +211,36 @@ func (d *DetectorTestSuite) TestPerfectMatchNoConflicts() {
 	}
 
 	detector := new(Detector)
-	conflict, err := detector.findConflicts(match)
-	d.NoError(err)
+	conflicts := detector.findConflictPaths(match)
 
 	// A perfect match has no conflicts.
-	d.Nil(conflict)
+	d.Len(conflicts, 0)
 }
 
-func (d *DetectorTestSuite) TestPartialMatchSomeConflicts() {
+func (d *DetectorTestSuite) TestFindConflictsSomeConflicts() {
 	leftNum := uint32(1)
 	rightNum := uint32(2)
 	leftBool := false
 	rightBool := true
-	t := time.Now().UTC()
+
+	tz, err := time.LoadLocation("America/New_York")
+	d.NoError(err)
+
+	t1 := &models.FHIRDateTime{
+		Time:      time.Date(1994, time.January, 6, 12, 58, 00, 00, tz),
+		Precision: models.Timestamp,
+	}
+	t2 := &models.FHIRDateTime{
+		Time:      time.Date(1994, time.January, 6, 12, 58, 00, 00, tz),
+		Precision: models.Timestamp,
+	}
 
 	match := &Match{
 		ResourceType: "BarType",
 		Left: &BarType{
 			A: "A",
 			B: &leftNum,
-			C: t,
+			C: t1,
 			D: &BazType{
 				X: "Y",
 				Y: &leftBool,
@@ -90,7 +249,7 @@ func (d *DetectorTestSuite) TestPartialMatchSomeConflicts() {
 		Right: &BarType{
 			A: "B",
 			B: &rightNum,
-			C: t,
+			C: t2,
 			D: &BazType{
 				X: "X",
 				Y: &rightBool,
@@ -99,21 +258,18 @@ func (d *DetectorTestSuite) TestPartialMatchSomeConflicts() {
 	}
 
 	detector := new(Detector)
-	conflict, err := detector.findConflicts(match)
-	d.NoError(err)
-	d.NotNil(conflict)
-
-	d.Len(conflict.Issue, 1)
-	issue := conflict.Issue[0]
-
-	d.Len(issue.Location, 4)
+	conflicts := detector.findConflictPaths(match)
+	d.Len(conflicts, 4)
 }
 
-func (d *DetectorTestSuite) TestUncommonPathsSomeConflicts() {
+func (d *DetectorTestSuite) TestFindConflictsUncommonPathsSomeConflicts() {
 	leftNum := uint32(1)
 	rightNum := uint32(1)
 	rightBool := false
-	t := time.Now().UTC()
+	t := &models.FHIRDateTime{
+		Time:      time.Now().UTC(),
+		Precision: models.Timestamp,
+	}
 
 	// The left resource has fields not in the right, the right has fields
 	// not in the left. These should automatically be conflicts.
@@ -135,94 +291,13 @@ func (d *DetectorTestSuite) TestUncommonPathsSomeConflicts() {
 	}
 
 	detector := new(Detector)
-	conflict, err := detector.findConflicts(match)
-	d.NoError(err)
-	d.NotNil(conflict)
+	conflicts := detector.findConflictPaths(match)
 
-	// Should be 1 conflict with 3 locations: left a, right d.x, right d.y
-	d.Len(conflict.Issue, 1)
-	d.Len(conflict.Issue[0].Location, 3)
+	// Should be 3 locations: left a, right d.x, right d.y
+	d.Len(conflicts, 3)
 
 	expectedPaths := []string{"a", "d.x", "d.y"}
-	for _, loc := range conflict.Issue[0].Location {
-		d.True(contains(expectedPaths, loc))
-	}
-}
-
-func (d *DetectorTestSuite) TestMultipleMatchesSomeConflicts() {
-	leftNum1 := uint32(1)
-	rightNum1 := uint32(2)
-	leftBool1 := true
-	rightBool1 := false
-	t1 := time.Now().UTC()
-
-	// Conflicts: b, d.y
-	match1 := &Match{
-		ResourceType: "BarType",
-		Left: &BarType{
-			A: "A",
-			B: &leftNum1,
-			C: t1,
-			D: &BazType{
-				X: "X",
-				Y: &leftBool1,
-			},
-		},
-		Right: &BarType{
-			A: "A",
-			B: &rightNum1,
-			C: t1,
-			D: &BazType{
-				X: "X",
-				Y: &rightBool1,
-			},
-		},
-	}
-
-	rightNum2 := uint32(14)
-	leftBool2 := true
-	t2 := time.Now().UTC()
-
-	// Conflicts: a, b, c, d.y
-	match2 := &Match{
-		ResourceType: "BarType",
-		Left: &BarType{
-			A: "B",
-			C: t1,
-			D: &BazType{
-				X: "X",
-				Y: &leftBool2,
-			},
-		},
-		Right: &BarType{
-			A: "A",
-			B: &rightNum2,
-			C: t2,
-			D: &BazType{
-				X: "X",
-			},
-		},
-	}
-
-	detector := new(Detector)
-	conflicts, err := detector.AllConflicts([]Match{*match1, *match2})
-	d.NoError(err)
-
-	d.Len(conflicts, 2)
-	conflict0 := conflicts[0]
-	d.Len(conflict0.Issue, 1)
-	conflict1 := conflicts[1]
-	d.Len(conflict1.Issue, 1)
-
-	// Validate the first conflict.
-	expectedPaths := []string{"b", "d.y"}
-	for _, loc := range conflict0.Issue[0].Location {
-		d.True(contains(expectedPaths, loc))
-	}
-
-	// Validate the second conflict.
-	expectedPaths = []string{"a", "b", "c", "d.y"}
-	for _, loc := range conflict1.Issue[0].Location {
+	for _, loc := range conflicts {
 		d.True(contains(expectedPaths, loc))
 	}
 }
@@ -284,13 +359,38 @@ func (rt *ResourceTraversalTestSuite) TestCompareBooleanValues() {
 func (rt *ResourceTraversalTestSuite) TestCompareTimeValues() {
 	d := new(Detector)
 
-	t := time.Now().UTC()
-	t1 := reflect.ValueOf(t)
-	t2 := reflect.ValueOf(t)
-	rt.True(d.compareValues(t1, t2))
+	t := time.Now()
+	t1 := models.FHIRDateTime{
+		Time:      t,
+		Precision: models.Timestamp,
+	}
+	t2 := models.FHIRDateTime{
+		Time:      t,
+		Precision: models.Timestamp,
+	}
+	rt.True(d.compareValues(reflect.ValueOf(t1), reflect.ValueOf(t2)))
 
-	t3 := reflect.ValueOf(time.Now().UTC())
-	rt.False(d.compareValues(t1, t3))
+	t3 := models.FHIRDateTime{
+		Time:      time.Now(),
+		Precision: models.Timestamp,
+	}
+	rt.False(d.compareValues(reflect.ValueOf(t1), reflect.ValueOf(t3)))
+}
+
+func (rt *ResourceTraversalTestSuite) TestCompareDateValues() {
+	d := new(Detector)
+
+	d1 := models.FHIRDateTime{
+		Time:      time.Date(1976, 12, 1, 0, 0, 0, 0, time.UTC),
+		Precision: models.Date,
+	}
+
+	d2 := models.FHIRDateTime{
+		Time:      time.Date(1976, 11, 1, 0, 0, 0, 0, time.UTC),
+		Precision: models.Date,
+	}
+	rt.True(d.compareValues(reflect.ValueOf(d1), reflect.ValueOf(d1)))
+	rt.False(d.compareValues(reflect.ValueOf(d1), reflect.ValueOf(d2)))
 }
 
 func (rt *ResourceTraversalTestSuite) TestCompareDifferentKindsAlwaysFalse() {

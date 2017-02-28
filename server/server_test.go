@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"gopkg.in/mgo.v2/bson"
@@ -14,14 +15,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/intervention-engine/fhir/models"
 	"github.com/intervention-engine/fhir/server"
+	"github.com/mitre/ptmerge/fhirutil"
 	"github.com/mitre/ptmerge/state"
 	"github.com/mitre/ptmerge/testutil"
 	"github.com/stretchr/testify/suite"
 )
 
 type ServerTestSuite struct {
-	// The MongoSuite from IE provides useful features for starting/stopping
-	// a test mongo database, as well as inserting test fixtures.
+	// The MongoSuite borrowed from IE provides useful features for starting/stopping
+	// a test mongo database. The same database is used by the mock FHIR server and
+	// mock PTMergeServer.
 	testutil.MongoSuite
 	PTMergeServer *httptest.Server
 	FHIRServer    *httptest.Server
@@ -39,7 +42,7 @@ func (s *ServerTestSuite) SetupSuite() {
 	// call to s.DB() stands up the mock Mongo server, see testutil/mongo_suite.go for more.
 	fhirEngine := gin.New()
 	ms := server.NewMasterSession(s.DB().Session, "ptmerge-test")
-	server.RegisterRoutes(fhirEngine, nil, server.NewMongoDataAccessLayer(ms, nil), server.Config{})
+	server.RegisterRoutes(fhirEngine, nil, server.NewMongoDataAccessLayer(ms, nil, true), server.Config{})
 	s.FHIRServer = httptest.NewServer(fhirEngine)
 
 	// Create a mock PTMergeServer.
@@ -66,30 +69,15 @@ func (s *ServerTestSuite) TearDownTest() {
 // ========================================================================= //
 
 func (s *ServerTestSuite) TestMergeNoConflicts() {
-	// We can't test Merge until that feature is built.
 	s.T().Skip()
 }
 
-func (s *ServerTestSuite) TestMergeWithConflicts() {
-	// We can't test Merge until that feature is built.
+func (s *ServerTestSuite) TestMergeSomeConflicts() {
 	s.T().Skip()
 }
 
-func (s *ServerTestSuite) TestMergeInvalidRequest() {
-	// Make the merge request.
-	req := s.PTMergeServer.URL + "/merge?foo=bar"
-	errResponse, err := http.Post(req, "", nil)
-	s.NoError(err)
-	defer errResponse.Body.Close()
-
-	// Malformed requests should get a 4xx response.
-	s.Equal(http.StatusBadRequest, errResponse.StatusCode)
-	body, err := ioutil.ReadAll(errResponse.Body)
-	s.Equal("URL(s) referencing source bundles were not provided", string(body))
-}
-
-func (s *ServerTestSuite) TestMergeResourcesNotFound() {
-	// We can't test Merge until that feature is built.
+func (s *ServerTestSuite) TestMergeImbalanceLeftAndRight() {
+	// There are many resources in the left not in the right, and vise versa.
 	s.T().Skip()
 }
 
@@ -97,13 +85,11 @@ func (s *ServerTestSuite) TestMergeResourcesNotFound() {
 // TEST RESOLVE CONFLICTS                                                    //
 // ========================================================================= //
 
-func (s *ServerTestSuite) TestResolveConflictNoMoreConflicts() {
-	// We can't test ResolveConflict until that feature is built.
+func (s *ServerTestSuite) TestResolveConflictConflictResolved() {
 	s.T().Skip()
 }
 
-func (s *ServerTestSuite) TestResolveConflictMoreConflicts() {
-	// We can't test ResolveConflict until that feature is built.
+func (s *ServerTestSuite) TestResolveConflictNoMoreConflicts() {
 	s.T().Skip()
 }
 
@@ -111,24 +97,42 @@ func (s *ServerTestSuite) TestResolveConflictMergeNotFound() {
 	var err error
 
 	// Insert some merges so there's something to query against.
+	c1 := make(state.ConflictMap)
 	cid1 := bson.NewObjectId().Hex()
-	cid2 := bson.NewObjectId().Hex()
-	conflicts := state.ConflictMap{
-		cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
-			Resolved: false,
-		},
-		cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
-			Resolved: false,
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	targetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	_, err = s.insertMergeState(targetURL, conflicts)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
 	s.NoError(err)
 
-	targetURL = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	_, err = s.insertMergeState(targetURL, conflicts)
+	c2 := make(state.ConflictMap)
+	cid2 := bson.NewObjectId().Hex()
+	c2[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
+	}
+	m2 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m2)
 	s.NoError(err)
 
 	// Try to resolve a conflict for a merge (and a conflict) that doesn't exist.
@@ -147,7 +151,7 @@ func (s *ServerTestSuite) TestResolveConflictMergeNotFound() {
 		}`)
 
 	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolve/" + conflictID
-	res, err := http.Post(req, "application/json", bytes.NewBuffer(resource))
+	res, err := http.Post(req, "application/json", bytes.NewReader(resource))
 	s.NoError(err)
 	defer res.Body.Close()
 
@@ -161,25 +165,43 @@ func (s *ServerTestSuite) TestResolveConflictMergeNotFound() {
 func (s *ServerTestSuite) TestResolveConflictConflictNotFound() {
 	var err error
 
-	// Insert some merges so there's something to query against
+	// Insert some merges so there's something to query against.
+	c1 := make(state.ConflictMap)
 	cid1 := bson.NewObjectId().Hex()
-	cid2 := bson.NewObjectId().Hex()
-	conflicts := state.ConflictMap{
-		cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
-			Resolved: false,
-		},
-		cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
-			Resolved: false,
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	targetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(targetURL, conflicts)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
 	s.NoError(err)
 
-	targetURL = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	_, err = s.insertMergeState(targetURL, conflicts)
+	c2 := make(state.ConflictMap)
+	cid2 := bson.NewObjectId().Hex()
+	c2[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
+	}
+	m2 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m2)
 	s.NoError(err)
 
 	// Try to resolve a conflict for a that doesn't exist (but the merge does).
@@ -195,8 +217,8 @@ func (s *ServerTestSuite) TestResolveConflictConflictNotFound() {
 			"birthDate": "1950-09-02"
 		}`)
 
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolve/" + conflictID
-	res, err := http.Post(req, "application/json", bytes.NewBuffer(resource))
+	req := s.PTMergeServer.URL + "/merge/" + m1.MergeID + "/resolve/" + conflictID
+	res, err := http.Post(req, "application/json", bytes.NewReader(resource))
 	s.NoError(err)
 	defer res.Body.Close()
 
@@ -204,31 +226,49 @@ func (s *ServerTestSuite) TestResolveConflictConflictNotFound() {
 	s.NoError(err)
 
 	s.Equal(http.StatusNotFound, res.StatusCode)
-	s.Equal(fmt.Sprintf("Merge conflict %s not found for merge %s", conflictID, mergeID), string(body))
+	s.Equal(fmt.Sprintf("Merge conflict %s not found for merge %s", conflictID, m1.MergeID), string(body))
 }
 
 func (s *ServerTestSuite) TestResolveConflictConflictAlreadyResolved() {
 	var err error
 
 	// Insert some merges so there's something to query against.
+	c1 := make(state.ConflictMap)
 	cid1 := bson.NewObjectId().Hex()
-	cid2 := bson.NewObjectId().Hex()
-	conflicts := state.ConflictMap{
-		cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
-			Resolved: false,
-		},
-		cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
-			Resolved: true,
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	targetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	_, err = s.insertMergeState(targetURL, conflicts)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
 	s.NoError(err)
 
-	targetURL = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(targetURL, conflicts)
+	c2 := make(state.ConflictMap)
+	cid2 := bson.NewObjectId().Hex()
+	c2[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
+	}
+	m2 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c2,
+	}
+	mergeID2, err := s.insertMergeState(m2)
 	s.NoError(err)
 
 	resource := []byte(
@@ -242,8 +282,8 @@ func (s *ServerTestSuite) TestResolveConflictConflictAlreadyResolved() {
 			"birthDate": "1950-09-02"
 		}`)
 
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolve/" + cid2
-	res, err := http.Post(req, "application/json", bytes.NewBuffer(resource))
+	req := s.PTMergeServer.URL + "/merge/" + mergeID2 + "/resolve/" + cid2
+	res, err := http.Post(req, "application/json", bytes.NewReader(resource))
 	s.NoError(err)
 	defer res.Body.Close()
 
@@ -251,59 +291,7 @@ func (s *ServerTestSuite) TestResolveConflictConflictAlreadyResolved() {
 	s.NoError(err)
 
 	s.Equal(http.StatusBadRequest, res.StatusCode)
-	s.Equal(fmt.Sprintf("Merge conflict %s was already resolved for merge %s", cid2, mergeID), string(body))
-}
-
-func (s *ServerTestSuite) TestResolveConflictConflictAlreadyDeleted() {
-	var err error
-
-	// In practice this scenario should never happen (a conflict should never be deleted before it
-	// is resolved). However, this is still worth checking for.
-
-	// Insert some merges so there's something to query against.
-	cid1 := bson.NewObjectId().Hex()
-	cid2 := bson.NewObjectId().Hex()
-	conflicts := state.ConflictMap{
-		cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
-			Resolved: true,
-			Deleted:  true,
-		},
-		cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
-			Resolved: false,
-			Deleted:  true,
-		},
-	}
-	targetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	_, err = s.insertMergeState(targetURL, conflicts)
-	s.NoError(err)
-
-	targetURL = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(targetURL, conflicts)
-	s.NoError(err)
-
-	resource := []byte(
-		`{
-			"resourceType": "Patient",
-			"name": [{
-				"family": "Abbott",
-				"given": ["Clint"]
-			}],
-			"gender": "male",
-			"birthDate": "1950-09-02"
-		}`)
-
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolve/" + cid2
-	res, err := http.Post(req, "application/json", bytes.NewBuffer(resource))
-	s.NoError(err)
-	defer res.Body.Close()
-
-	body, err := ioutil.ReadAll(res.Body)
-	s.NoError(err)
-
-	s.Equal(http.StatusBadRequest, res.StatusCode)
-	s.Equal(fmt.Sprintf("Merge conflict %s was already resolved and deleted for merge %s", cid2, mergeID), string(body))
+	s.Equal(fmt.Sprintf("Merge conflict %s was already resolved for merge %s", cid2, mergeID2), string(body))
 }
 
 // ========================================================================= //
@@ -311,24 +299,39 @@ func (s *ServerTestSuite) TestResolveConflictConflictAlreadyDeleted() {
 // ========================================================================= //
 
 func (s *ServerTestSuite) TestAbortMerge() {
-	// Put a target bundle and a conflict on the host FHIR server.
-	conflict, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_2.json")
-	s.NoError(err)
-	s.NotNil(conflict)
+	var err error
 
-	target, err := testutil.PostPatientBundle(s.FHIRServer.URL, "../fixtures/two_conflicts/john_peters_bundle_1.json")
+	// Put a target bundle and a conflict on the host FHIR server.
+	fix, err := fhirutil.LoadResource("OperationOutcome", "../fixtures/operation_outcomes/oo_0.json")
+	resource, err := fhirutil.PostResource(s.FHIRServer.URL, "OperationOutcome", fix)
+	s.NoError(err)
+	conflict, ok := resource.(*models.OperationOutcome)
+	s.True(ok)
+
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/john_peters_bundle.json")
+	resource, err = fhirutil.PostResource(s.FHIRServer.URL, "Bundle", fix)
+	s.NoError(err)
+	target, ok := resource.(*models.Bundle)
+	s.True(ok)
 
 	// Put the merge state in mongo.
-	conflicts := make(state.ConflictMap)
-	conflictID := conflict.Resource.Id
-	conflicts[conflictID] = &state.ConflictState{
-		URL:      s.FHIRServer.URL + "/OperationOutcome/" + conflictID,
-		Resolved: false,
+	c1 := make(state.ConflictMap)
+	c1[conflict.Id] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + conflict.Id,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
 	}
-	targetURL := s.FHIRServer.URL + "/Bundle/" + target.Resource.Id
-	mergeID, err := s.insertMergeState(targetURL, conflicts)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + target.Id,
+		Conflicts: c1,
+	}
+	mergeID, err := s.insertMergeState(m1)
 	s.NoError(err)
-	s.NotEmpty(mergeID)
 
 	// Make the request.
 	res, err := http.Post(s.PTMergeServer.URL+"/merge/"+mergeID+"/abort", "", nil)
@@ -341,24 +344,42 @@ func (s *ServerTestSuite) TestAbortMergeMergeNotFound() {
 	var err error
 
 	// Insert some merges so there's something to query against.
+	c1 := make(state.ConflictMap)
 	cid1 := bson.NewObjectId().Hex()
-	cid2 := bson.NewObjectId().Hex()
-	conflicts := state.ConflictMap{
-		cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid1,
-			Resolved: false,
-		},
-		cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + cid2,
-			Resolved: false,
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	targetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	_, err = s.insertMergeState(targetURL, conflicts)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
 	s.NoError(err)
 
-	targetURL = s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	_, err = s.insertMergeState(targetURL, conflicts)
+	c2 := make(state.ConflictMap)
+	cid2 := bson.NewObjectId().Hex()
+	c2[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
+	}
+	m2 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m2)
 	s.NoError(err)
 
 	// Try to abort a merge that doesn't exist.
@@ -383,73 +404,49 @@ func (s *ServerTestSuite) TestAllMerges() {
 	var err error
 
 	// Merge 1 metadata.
-	m1cid1 := bson.NewObjectId().Hex()
-	m1cid2 := bson.NewObjectId().Hex()
-	m1targetID := bson.NewObjectId().Hex()
-
-	conflicts := state.ConflictMap{
-		m1cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
-			Resolved: false,
-		},
-		m1cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
-			Resolved: false,
+	c1 := make(state.ConflictMap)
+	cid1 := bson.NewObjectId().Hex()
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	m1TargetURL := s.FHIRServer.URL + "/Bundle/" + m1targetID
-	m1mergeID, err := s.insertMergeState(m1TargetURL, conflicts)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
 	s.NoError(err)
 
 	// Merge 2 metadata.
-	m2cid1 := bson.NewObjectId().Hex()
-	m2cid2 := bson.NewObjectId().Hex()
-	m2targetID := bson.NewObjectId().Hex()
-
-	conflicts = state.ConflictMap{
-		m2cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m2cid1,
-			Resolved: false,
-		},
-		m2cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m2cid2,
-			Resolved: true,
+	c2 := make(state.ConflictMap)
+	cid2 := bson.NewObjectId().Hex()
+	c2[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	m2TargetURL := s.FHIRServer.URL + "/Bundle/" + m2targetID
-	m2mergeID, err := s.insertMergeState(m2TargetURL, conflicts)
-	s.NoError(err)
-
-	// Merge 3 metadata.
-	m3cid1 := bson.NewObjectId().Hex()
-	m3cid2 := bson.NewObjectId().Hex()
-	m3targetID := bson.NewObjectId().Hex()
-
-	conflicts = state.ConflictMap{
-		m3cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m3cid1,
-			Resolved: true,
-			Deleted:  true,
-		},
-		m3cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m3cid2,
-			Resolved: true,
-			Deleted:  true,
-		},
+	m2 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
 	}
-	m3TargetURL := s.FHIRServer.URL + "/Bundle/" + m3targetID
-	m3mergeID, err := s.insertMergeState(m3TargetURL, conflicts)
-	err = s.DB().C("merges").Update(
-		bson.M{"_id": m3mergeID},
-		bson.M{"$set": bson.M{"completed": true}},
-	)
+	_, err = s.insertMergeState(m2)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge"
-	res, err := http.Get(req)
-
+	res, err := http.Get(s.PTMergeServer.URL + "/merge")
 	s.NoError(err)
+	defer res.Body.Close()
 	s.Equal(http.StatusOK, res.StatusCode)
 
 	// Umnarshal the response body.
@@ -460,48 +457,46 @@ func (s *ServerTestSuite) TestAllMerges() {
 	s.NoError(err)
 
 	s.NotEmpty(metadata.Timestamp)
-	s.Len(metadata.Merges, 3)
+	s.Len(metadata.Merges, 2)
 
 	// Validate the first merge.
-	merge1 := metadata.Merges[0]
-	s.Equal(m1mergeID, merge1.MergeID)
+	var merge1, merge2 state.MergeState
+	if metadata.Merges[0].MergeID == m1.MergeID {
+		merge1 = metadata.Merges[0]
+		merge2 = metadata.Merges[1]
+	} else {
+		merge1 = metadata.Merges[1]
+		merge2 = metadata.Merges[0]
+	}
+	s.Equal(m1.MergeID, merge1.MergeID)
 	s.False(merge1.Completed)
-	s.Equal(m1TargetURL, merge1.TargetURL)
-	s.Len(merge1.Conflicts, 2)
+	s.Equal(m1.TargetURL, merge1.TargetURL)
+	s.Len(merge1.Conflicts, 1)
 
-	// Just validate one of the conflicts. If it was sent correctly, the rest were too.
-	conflict, ok := merge1.Conflicts[m1cid1]
+	// Validate the conflicts.
+	conflict, ok := merge1.Conflicts[merge1.Conflicts.Keys()[0]]
 	s.True(ok)
-	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+m1cid1, conflict.URL)
+	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+m1.Conflicts.Keys()[0], conflict.OperationOutcomeURL)
 	s.False(conflict.Resolved)
-	s.False(conflict.Deleted)
 
 	// Validate the second merge.
-	merge2 := metadata.Merges[1]
-	s.Equal(m2mergeID, merge2.MergeID)
+	s.Equal(m2.MergeID, merge2.MergeID)
 	s.False(merge2.Completed)
-	s.Equal(m2TargetURL, merge2.TargetURL)
-	s.Len(merge2.Conflicts, 2)
+	s.Equal(m2.TargetURL, merge2.TargetURL)
+	s.Len(merge2.Conflicts, 1)
 
-	// Validate the third merge.
-	merge3 := metadata.Merges[2]
-	s.Equal(m3mergeID, merge3.MergeID)
-	s.True(merge3.Completed)
-	s.Len(merge3.Conflicts, 2)
-
-	s.True(merge3.Conflicts[m3cid1].Resolved)
-	s.True(merge3.Conflicts[m3cid1].Deleted)
-
-	s.True(merge3.Conflicts[m3cid2].Resolved)
-	s.True(merge3.Conflicts[m3cid2].Deleted)
+	// Validate the conflicts.
+	conflict, ok = merge2.Conflicts[merge2.Conflicts.Keys()[0]]
+	s.True(ok)
+	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+m2.Conflicts.Keys()[0], conflict.OperationOutcomeURL)
+	s.False(conflict.Resolved)
 }
 
 func (s *ServerTestSuite) TestAllMergesNoMerges() {
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge"
-	res, err := http.Get(req)
-
+	res, err := http.Get(s.PTMergeServer.URL + "/merge")
 	s.NoError(err)
+	defer res.Body.Close()
 	s.Equal(http.StatusOK, res.StatusCode)
 
 	// Umnarshal the response body.
@@ -523,29 +518,29 @@ func (s *ServerTestSuite) TestGetMerge() {
 	var err error
 
 	// Merge metadata.
-	m1cid1 := bson.NewObjectId().Hex()
-	m1cid2 := bson.NewObjectId().Hex()
-	m1targetID := bson.NewObjectId().Hex()
-
-	conflicts := state.ConflictMap{
-		m1cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
-			Resolved: false,
-		},
-		m1cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
-			Resolved: true,
+	c1 := make(state.ConflictMap)
+	cid1 := bson.NewObjectId().Hex()
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	m1TargetURL := s.FHIRServer.URL + "/Bundle/" + m1targetID
-	mergeID, err := s.insertMergeState(m1TargetURL, conflicts)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID
-	res, err := http.Get(req)
-
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + m1.MergeID)
 	s.NoError(err)
+	defer res.Body.Close()
 	s.Equal(http.StatusOK, res.StatusCode)
 
 	// Umnarshal the response body.
@@ -558,19 +553,14 @@ func (s *ServerTestSuite) TestGetMerge() {
 	s.NotEmpty(metadata.Timestamp)
 	merge := metadata.Merge
 
-	s.Equal(mergeID, merge.MergeID)
-	s.Equal(m1TargetURL, merge.TargetURL)
-	s.Len(merge.Conflicts, 2)
+	s.Equal(m1.MergeID, merge.MergeID)
+	s.Equal(m1.TargetURL, merge.TargetURL)
+	s.Len(merge.Conflicts, 1)
 
-	conflict1, ok := merge.Conflicts[m1cid1]
+	conflict1, ok := merge.Conflicts[merge.Conflicts.Keys()[0]]
 	s.True(ok)
-	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+m1cid1, conflict1.URL)
+	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+m1.Conflicts.Keys()[0], conflict1.OperationOutcomeURL)
 	s.False(conflict1.Resolved)
-
-	conflict2, ok := merge.Conflicts[m1cid2]
-	s.True(ok)
-	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+m1cid2, conflict2.URL)
-	s.True(conflict2.Resolved)
 }
 
 func (s *ServerTestSuite) TestGetMergeNotFound() {
@@ -587,39 +577,61 @@ func (s *ServerTestSuite) TestGetMergeNotFound() {
 // ========================================================================= //
 
 func (s *ServerTestSuite) TestGetRemainingConflicts() {
+	var err error
+
+	// Put the OperationOutcomes on the FHIR server.
+	oo1 := fhirutil.OperationOutcome(
+		"Patient",
+		bson.NewObjectId().Hex(),
+		[]string{"foo", "bar.x", "bar.y"},
+	)
+	created1, err := fhirutil.PostResource(s.FHIRServer.URL, "OperationOutcome", oo1)
+	s.NoError(err)
+	coo1, ok := created1.(*models.OperationOutcome)
+	s.True(ok)
+
+	oo2 := fhirutil.OperationOutcome(
+		"Patient",
+		bson.NewObjectId().Hex(),
+		[]string{"foo", "bar.u", "bar.v"},
+	)
+
+	created2, err := fhirutil.PostResource(s.FHIRServer.URL, "OperationOutcome", oo2)
+	s.NoError(err)
+	coo2, ok := created2.(*models.OperationOutcome)
+	s.True(ok)
+
 	// Create a merge with 2 conflicts, one resolved.
-	conflict1, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_1.json")
-	s.NoError(err)
-	s.NotNil(conflict1)
-
-	conflict2, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_2.json")
-	s.NoError(err)
-	s.NotNil(conflict2)
-
-	// Put the merge state in mongo.
-	m1cid1 := conflict1.Resource.Id
-	m1cid2 := conflict2.Resource.Id
-
-	conflicts := state.ConflictMap{
-		m1cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
-			Resolved: false,
-		},
-		m1cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
-			Resolved: true, // This conflict is resolved
+	c1 := make(state.ConflictMap)
+	c1[coo1.Id] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + coo1.Id,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   strings.SplitN(coo1.Issue[0].Diagnostics, ":", 2)[1],
+			ResourceType: "Patient",
 		},
 	}
-	m1TargetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(m1TargetURL, conflicts)
+	c1[coo2.Id] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + coo2.Id,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   strings.SplitN(coo2.Issue[0].Diagnostics, ":", 2)[1],
+			ResourceType: "Patient",
+		},
+	}
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	mergeID, err := s.insertMergeState(m1)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/conflicts"
-
-	res, err := http.Get(req)
-	defer res.Body.Close()
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + mergeID + "/conflicts")
 	s.NoError(err)
+	defer res.Body.Close()
 
 	// Check the response.
 	s.Equal(http.StatusOK, res.StatusCode)
@@ -634,45 +646,72 @@ func (s *ServerTestSuite) TestGetRemainingConflicts() {
 
 	// Validate the one remaining conflict.
 	entry := ooBundle.Entry[0]
-	conflict, ok := entry.Resource.(*models.OperationOutcome)
+	oo, ok := entry.Resource.(*models.OperationOutcome)
 	s.True(ok)
-	s.Equal(m1cid1, conflict.Resource.Id)
+
+	s.Equal(coo1.Id, oo.Id)
+	s.Len(oo.Issue, 1)
+	s.Len(oo.Issue[0].Location, 3)
+	s.Equal([]string{"foo", "bar.x", "bar.y"}, oo.Issue[0].Location)
+	s.Equal("Patient:"+c1[coo1.Id].TargetResource.ResourceID, oo.Issue[0].Diagnostics)
 }
 
 func (s *ServerTestSuite) TestGetRemainingConflictsNoneRemaining() {
-	// Create a merge with 2 conflicts, both resolved.
-	conflict1, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_1.json")
-	s.NoError(err)
-	s.NotNil(conflict1)
+	var err error
 
-	conflict2, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_2.json")
-	s.NoError(err)
-	s.NotNil(conflict2)
-
-	// Put the merge state in mongo.
-	m1cid1 := conflict1.Resource.Id
-	m1cid2 := conflict2.Resource.Id
-
-	conflicts := state.ConflictMap{
-		m1cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
-			Resolved: true,
-		},
-		m1cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
-			Resolved: true,
+	c1 := make(state.ConflictMap)
+	cid1 := bson.NewObjectId().Hex()
+	cid2 := bson.NewObjectId().Hex()
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	m1TargetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(m1TargetURL, conflicts)
+	c1[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
+	}
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	mergeID, err := s.insertMergeState(m1)
+	s.NoError(err)
+
+	// Put the OperationOutcomes on the FHIR server.
+	_, err = fhirutil.PostResource(
+		s.FHIRServer.URL, "OperationOutcome",
+		fhirutil.OperationOutcome(
+			"Patient",
+			c1[cid1].TargetResource.ResourceID,
+			[]string{"foo", "bar.x", "bar.y"},
+		),
+	)
+	s.NoError(err)
+
+	_, err = fhirutil.PostResource(
+		s.FHIRServer.URL, "OperationOutcome",
+		fhirutil.OperationOutcome(
+			"Patient",
+			c1[cid2].TargetResource.ResourceID,
+			[]string{"foo", "bar.u", "bar.v"},
+		),
+	)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/conflicts"
-
-	res, err := http.Get(req)
-	defer res.Body.Close()
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + mergeID + "/conflicts")
 	s.NoError(err)
+	defer res.Body.Close()
 
 	// Check the response.
 	s.Equal(http.StatusOK, res.StatusCode)
@@ -687,37 +726,48 @@ func (s *ServerTestSuite) TestGetRemainingConflictsNoneRemaining() {
 }
 
 func (s *ServerTestSuite) TestGetRemainingConflictsConflictNotFound() {
-	// Put the merge state in mongo.
-	m1cid1 := bson.NewObjectId().Hex()
-	m1cid2 := bson.NewObjectId().Hex()
+	var err error
 
-	conflicts := state.ConflictMap{
-		m1cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
-			Resolved: false,
-		},
-		m1cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
-			Resolved: true,
+	// Create a merge with 2 conflicts, one resolved.
+	c1 := make(state.ConflictMap)
+	cid1 := bson.NewObjectId().Hex()
+	cid2 := bson.NewObjectId().Hex()
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	m1TargetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(m1TargetURL, conflicts)
+	c1[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
+	}
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	mergeID, err := s.insertMergeState(m1)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/conflicts"
-
-	res, err := http.Get(req)
-	defer res.Body.Close()
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + mergeID + "/conflicts")
 	s.NoError(err)
+	defer res.Body.Close()
 
 	// Check the response.
 	body, err := ioutil.ReadAll(res.Body)
 	s.NoError(err)
 
 	s.Equal(http.StatusInternalServerError, res.StatusCode)
-	s.Equal(fmt.Sprintf("Resource %s not found", s.FHIRServer.URL+"/OperationOutcome/"+m1cid1), string(body))
+	s.Equal(fmt.Sprintf("Resource %s not found", "OperationOutcome:"+cid1), string(body))
 }
 
 func (s *ServerTestSuite) TestGetRemainingConflictsMergeNotFound() {
@@ -726,8 +776,8 @@ func (s *ServerTestSuite) TestGetRemainingConflictsMergeNotFound() {
 	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/conflicts"
 
 	res, err := http.Get(req)
-	defer res.Body.Close()
 	s.NoError(err)
+	defer res.Body.Close()
 
 	body, err := ioutil.ReadAll(res.Body)
 	s.NoError(err)
@@ -741,39 +791,61 @@ func (s *ServerTestSuite) TestGetRemainingConflictsMergeNotFound() {
 // ========================================================================= //
 
 func (s *ServerTestSuite) TestGetResolvedConflicts() {
+	var err error
+
+	// Put the OperationOutcomes on the FHIR server.
+	oo1 := fhirutil.OperationOutcome(
+		"Patient",
+		bson.NewObjectId().Hex(),
+		[]string{"foo", "bar.x", "bar.y"},
+	)
+	created1, err := fhirutil.PostResource(s.FHIRServer.URL, "OperationOutcome", oo1)
+	s.NoError(err)
+	coo1, ok := created1.(*models.OperationOutcome)
+	s.True(ok)
+
+	oo2 := fhirutil.OperationOutcome(
+		"Patient",
+		bson.NewObjectId().Hex(),
+		[]string{"foo", "bar.u", "bar.v"},
+	)
+
+	created2, err := fhirutil.PostResource(s.FHIRServer.URL, "OperationOutcome", oo2)
+	s.NoError(err)
+	coo2, ok := created2.(*models.OperationOutcome)
+	s.True(ok)
+
 	// Create a merge with 2 conflicts, one resolved.
-	conflict1, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_1.json")
-	s.NoError(err)
-	s.NotNil(conflict1)
-
-	conflict2, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_2.json")
-	s.NoError(err)
-	s.NotNil(conflict2)
-
-	// Put the merge state in mongo.
-	m1cid1 := conflict1.Resource.Id
-	m1cid2 := conflict2.Resource.Id
-
-	conflicts := state.ConflictMap{
-		m1cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
-			Resolved: false,
-		},
-		m1cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
-			Resolved: true, // This conflict is resolved
+	c1 := make(state.ConflictMap)
+	c1[coo1.Id] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + coo1.Id,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   strings.SplitN(coo1.Issue[0].Diagnostics, ":", 2)[1],
+			ResourceType: "Patient",
 		},
 	}
-	m1TargetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(m1TargetURL, conflicts)
+	c1[coo2.Id] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + coo2.Id,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   strings.SplitN(coo2.Issue[0].Diagnostics, ":", 2)[1],
+			ResourceType: "Patient",
+		},
+	}
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	mergeID, err := s.insertMergeState(m1)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolved"
-
-	res, err := http.Get(req)
-	defer res.Body.Close()
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + mergeID + "/resolved")
 	s.NoError(err)
+	defer res.Body.Close()
 
 	// Check the response.
 	s.Equal(http.StatusOK, res.StatusCode)
@@ -788,45 +860,52 @@ func (s *ServerTestSuite) TestGetResolvedConflicts() {
 
 	// Validate the one remaining conflict.
 	entry := ooBundle.Entry[0]
-	conflict, ok := entry.Resource.(*models.OperationOutcome)
+	oo, ok := entry.Resource.(*models.OperationOutcome)
 	s.True(ok)
-	s.Equal(m1cid2, conflict.Resource.Id)
+
+	s.Equal(coo2.Id, oo.Id)
+	s.Len(oo.Issue, 1)
+	s.Len(oo.Issue[0].Location, 3)
+	s.Equal([]string{"foo", "bar.u", "bar.v"}, oo.Issue[0].Location)
+	s.Equal("Patient:"+c1[coo2.Id].TargetResource.ResourceID, oo.Issue[0].Diagnostics)
 }
 
-func (s *ServerTestSuite) TestGetResolvedConflictsNoneFound() {
-	// Create a merge with 2 conflicts, neither resolved.
-	conflict1, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_1.json")
-	s.NoError(err)
-	s.NotNil(conflict1)
+func (s *ServerTestSuite) TestGetResolvedConflictsNoResolvedConflicts() {
+	var err error
 
-	conflict2, err := testutil.PostOperationOutcome(s.FHIRServer.URL, "../fixtures/two_conflicts/conflict_2.json")
-	s.NoError(err)
-	s.NotNil(conflict2)
-
-	// Put the merge state in mongo.
-	m1cid1 := conflict1.Resource.Id
-	m1cid2 := conflict2.Resource.Id
-
-	conflicts := state.ConflictMap{
-		m1cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
-			Resolved: false,
-		},
-		m1cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
-			Resolved: false,
+	// Create a merge with 2 conflicts, none resolved.
+	c1 := make(state.ConflictMap)
+	cid1 := bson.NewObjectId().Hex()
+	cid2 := bson.NewObjectId().Hex()
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	m1TargetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(m1TargetURL, conflicts)
+	c1[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
+	}
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	mergeID, err := s.insertMergeState(m1)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolved"
-
-	res, err := http.Get(req)
-	defer res.Body.Close()
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + mergeID + "/resolved")
 	s.NoError(err)
+	defer res.Body.Close()
 
 	// Check the response.
 	s.Equal(http.StatusOK, res.StatusCode)
@@ -840,38 +919,70 @@ func (s *ServerTestSuite) TestGetResolvedConflictsNoneFound() {
 	s.Len(ooBundle.Entry, 0)
 }
 
-func (s *ServerTestSuite) TestGetResolvedConflictsConflictsNotFound() {
-	// Put the merge state in mongo.
-	m1cid1 := bson.NewObjectId().Hex()
-	m1cid2 := bson.NewObjectId().Hex()
+func (s *ServerTestSuite) TestGetResolvedConflictsConflictNotFound() {
+	var err error
 
-	conflicts := state.ConflictMap{
-		m1cid1: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid1,
-			Resolved: true,
-		},
-		m1cid2: &state.ConflictState{
-			URL:      s.FHIRServer.URL + "/OperationOutcome/" + m1cid2,
-			Resolved: false,
+	// Create a merge with 2 conflicts, one resolved.
+	c1 := make(state.ConflictMap)
+	cid1 := bson.NewObjectId().Hex()
+	cid2 := bson.NewObjectId().Hex()
+	c1[cid1] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid1,
+		Resolved:            false,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
 		},
 	}
-	m1TargetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(m1TargetURL, conflicts)
+	c1[cid2] = &state.ConflictState{
+		OperationOutcomeURL: s.FHIRServer.URL + "/OperationOutcome/" + cid2,
+		Resolved:            true,
+		TargetResource: state.TargetResource{
+			ResourceID:   bson.NewObjectId().Hex(),
+			ResourceType: "Patient",
+		},
+	}
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	mergeID, err := s.insertMergeState(m1)
+	s.NoError(err)
+
+	// Put the OperationOutcomes on the FHIR server.
+	_, err = fhirutil.PostResource(
+		s.FHIRServer.URL, "OperationOutcome",
+		fhirutil.OperationOutcome(
+			"Patient",
+			c1[cid1].TargetResource.ResourceID,
+			[]string{"foo", "bar.x", "bar.y"},
+		),
+	)
+	s.NoError(err)
+
+	_, err = fhirutil.PostResource(
+		s.FHIRServer.URL, "OperationOutcome",
+		fhirutil.OperationOutcome(
+			"Patient",
+			c1[cid2].TargetResource.ResourceID,
+			[]string{"foo", "bar.u", "bar.v"},
+		),
+	)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolved"
-
-	res, err := http.Get(req)
-	defer res.Body.Close()
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + mergeID + "/resolved")
 	s.NoError(err)
+	defer res.Body.Close()
 
+	// Check the response.
 	body, err := ioutil.ReadAll(res.Body)
 	s.NoError(err)
 
-	// Check the response.
 	s.Equal(http.StatusInternalServerError, res.StatusCode)
-	s.Equal(fmt.Sprintf("Resource %s not found", s.FHIRServer.URL+"/OperationOutcome/"+m1cid1), string(body))
+	s.Equal(fmt.Sprintf("Resource %s not found", "OperationOutcome:"+cid2), string(body))
 }
 
 func (s *ServerTestSuite) TestGetResolvedConflictsMergeNotFound() {
@@ -880,8 +991,8 @@ func (s *ServerTestSuite) TestGetResolvedConflictsMergeNotFound() {
 	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/resolved"
 
 	res, err := http.Get(req)
-	defer res.Body.Close()
 	s.NoError(err)
+	defer res.Body.Close()
 
 	body, err := ioutil.ReadAll(res.Body)
 	s.NoError(err)
@@ -896,21 +1007,28 @@ func (s *ServerTestSuite) TestGetResolvedConflictsMergeNotFound() {
 
 func (s *ServerTestSuite) TestGetMergeTarget() {
 	// Create a target bundle.
-	target, err := testutil.PostPatientBundle(s.FHIRServer.URL, "../fixtures/two_conflicts/john_peters_bundle_1.json")
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
 	s.NoError(err)
+	created, err := fhirutil.PostResource(s.FHIRServer.URL, "Bundle", fix)
+	s.NoError(err)
+	target, ok := created.(*models.Bundle)
+	s.True(ok)
 
 	// Put the merge state in mongo.
-	conflicts := state.ConflictMap{}
-	targetURL := s.FHIRServer.URL + "/Bundle/" + target.Resource.Id
-	mergeID, err := s.insertMergeState(targetURL, conflicts)
+	c1 := make(state.ConflictMap)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + target.Id,
+		Conflicts: c1,
+	}
+	mergeID, err := s.insertMergeState(m1)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/target"
-
-	res, err := http.Get(req)
-	defer res.Body.Close()
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + mergeID + "/target")
 	s.NoError(err)
+	defer res.Body.Close()
 
 	// Check the response.
 	s.Equal(http.StatusOK, res.StatusCode)
@@ -919,31 +1037,34 @@ func (s *ServerTestSuite) TestGetMergeTarget() {
 	err = decoder.Decode(ooBundle)
 	s.NoError(err)
 
-	s.Equal("collection", ooBundle.Type)
-	s.Equal(uint32(19), *ooBundle.Total)
-	s.Len(ooBundle.Entry, 19)
+	s.Len(ooBundle.Entry, 7)
 }
 
 func (s *ServerTestSuite) TestGetMergeTargetTargetNotFound() {
+	var err error
+
 	// Put the merge state in mongo.
-	conflicts := state.ConflictMap{}
-	targetURL := s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex()
-	mergeID, err := s.insertMergeState(targetURL, conflicts)
+	c1 := make(state.ConflictMap)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
 	s.NoError(err)
 
 	// Make the request.
-	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/target"
-
-	res, err := http.Get(req)
-	defer res.Body.Close()
+	res, err := http.Get(s.PTMergeServer.URL + "/merge/" + m1.MergeID + "/target")
 	s.NoError(err)
+	defer res.Body.Close()
 
 	body, err := ioutil.ReadAll(res.Body)
 	s.NoError(err)
 
 	// Check the response.
 	s.Equal(http.StatusInternalServerError, res.StatusCode)
-	s.Equal(fmt.Sprintf("Resource %s not found", targetURL), string(body))
+	s.Equal(fmt.Sprintf("Resource %s not found", m1.TargetURL), string(body))
 }
 
 func (s *ServerTestSuite) TestGetMergeTargetMergeNotFound() {
@@ -952,8 +1073,8 @@ func (s *ServerTestSuite) TestGetMergeTargetMergeNotFound() {
 	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/target"
 
 	res, err := http.Get(req)
-	defer res.Body.Close()
 	s.NoError(err)
+	defer res.Body.Close()
 
 	body, err := ioutil.ReadAll(res.Body)
 	s.NoError(err)
@@ -969,16 +1090,10 @@ func (s *ServerTestSuite) TestGetMergeTargetMergeNotFound() {
 
 // insertMergeState inserts a MergeState into the test mongo database. This
 // helper uses the "ptmerge-test" database only.
-func (s *ServerTestSuite) insertMergeState(targetURL string, conflicts state.ConflictMap) (mergeID string, err error) {
-	mergeID = bson.NewObjectId().Hex()
-	mergeState := &state.MergeState{
-		MergeID:   mergeID,
-		TargetURL: targetURL,
-		Conflicts: conflicts,
-	}
+func (s *ServerTestSuite) insertMergeState(mergeState *state.MergeState) (mergeID string, err error) {
 	err = s.DB().C("merges").Insert(mergeState)
 	if err != nil {
 		return "", err
 	}
-	return mergeID, nil
+	return mergeState.MergeID, nil
 }

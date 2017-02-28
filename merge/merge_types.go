@@ -2,7 +2,6 @@ package merge
 
 import (
 	"reflect"
-	"strings"
 )
 
 // Match pairs up to FHIR resources that "match". These resources should be of the same
@@ -37,17 +36,6 @@ func (p PathMap) Keys() []string {
 		i++
 	}
 	return keys
-}
-
-func getResourceType(resource interface{}) string {
-	// For example, "*models.Patient"
-	typeWithPackage := reflect.TypeOf(resource).String()
-	// So split that part out.
-	parts := strings.Split(typeWithPackage, ".")
-	if len(parts) != 2 {
-		return ""
-	}
-	return parts[1]
 }
 
 // intersection returns all elements in left that are also in right.

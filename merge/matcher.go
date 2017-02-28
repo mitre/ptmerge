@@ -5,15 +5,15 @@ import (
 	"math"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/intervention-engine/fhir/models"
+	"github.com/mitre/ptmerge/fhirutil"
 )
 
 var (
 	// PathsUnsuitableForComparison are paths that don't offer meaningful comparison
 	// between two resources. For example, URLs or code systems.
-	PathsUnsuitableForComparison = []string{"url", "system", "id", "_id", "text"}
+	PathsUnsuitableForComparison = []string{"url", "system", "id", "_id", "text", "reference"}
 
 	// FloatTolerance identifies the minumum difference between 2 floats that still
 	// allows them to be considered a match.
@@ -82,10 +82,9 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 // Collects all resources in a bundle into structs that match their resource types.
 func (m *Matcher) collectResources(bundle *models.Bundle) (resources ResourceMap, err error) {
 	resources = make(ResourceMap)
-
 	for _, entry := range bundle.Entry {
 		// Get the entry.Resource's type.
-		resourceType := getResourceType(entry.Resource)
+		resourceType := fhirutil.GetResourceType(entry.Resource)
 		// Make sure it's a known FHIR type.
 		s := models.StructForResourceName(resourceType)
 		if s == nil {
@@ -131,8 +130,8 @@ func (m *Matcher) matchWithoutReplacement(lefts, rights []interface{}) (matches 
 			rightPathMap := rightPathMaps[i]
 
 			// Left and right must be the same type of resource.
-			leftResourceType := getResourceType(leftResource)
-			rightResourceType := getResourceType(rightResource)
+			leftResourceType := fhirutil.GetResourceType(leftResource)
+			rightResourceType := fhirutil.GetResourceType(rightResource)
 			if leftResourceType != rightResourceType {
 				return nil, nil, fmt.Errorf("Mismatched resource types %s and %s, cannot compare", leftResourceType, rightResourceType)
 			}
@@ -197,8 +196,8 @@ func (m *Matcher) comparePaths(leftPathMap, rightPathMap PathMap) bool {
 		return false
 	}
 
-	for _, cp := range matchablePaths {
-		if m.matchValues(leftPathMap[cp], rightPathMap[cp]) {
+	for _, mp := range matchablePaths {
+		if m.matchValues(leftPathMap[mp], rightPathMap[mp]) {
 			matchCounter++
 		}
 	}
@@ -250,13 +249,13 @@ func (m *Matcher) matchValues(left, right reflect.Value) bool {
 	case reflect.Bool:
 		return left.Bool() == right.Bool()
 
-	// This is only for time.Time objects, all other structs should have been traversed.
+	// This is only for models.FHIRDateTime objects, all other structs should have been traversed.
 	case reflect.Struct:
-		leftTime, ok := left.Interface().(time.Time)
+		leftTime, ok := left.Interface().(models.FHIRDateTime)
 		if !ok {
 			return false
 		}
-		rightTime, ok := right.Interface().(time.Time)
+		rightTime, ok := right.Interface().(models.FHIRDateTime)
 		if !ok {
 			return false
 		}
@@ -275,16 +274,17 @@ func fuzzyFloatMatch(leftFloat, rightFloat float64) bool {
 	return false
 }
 
-func fuzzyTimeMatch(leftTime, rightTime time.Time) bool {
-	// Check the the times both use the same location.
-	if leftTime.Location() != rightTime.Location() {
-		return false
+func fuzzyTimeMatch(leftTime, rightTime models.FHIRDateTime) bool {
+	// Check that the times both use the same location.
+	if leftTime.Time.Location() != rightTime.Time.Location() {
+		// If they don't, force them to UTC.
+		leftTime.Time = leftTime.Time.UTC()
+		rightTime.Time = rightTime.Time.UTC()
 	}
 
 	// Timestamps are a "match" if they occur on the same calendar day.
-	leftY, leftM, leftD := leftTime.Date()
-	rightY, rightM, rightD := rightTime.Date()
-
+	leftY, leftM, leftD := leftTime.Time.Date()
+	rightY, rightM, rightD := rightTime.Time.Date()
 	return ((leftY == rightY) && (leftM == rightM) && (leftD == rightD))
 }
 

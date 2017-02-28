@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/intervention-engine/fhir/models"
-	"github.com/mitre/ptmerge/testutil"
+	"github.com/mitre/ptmerge/fhirutil"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -19,29 +19,171 @@ func TestMatcherTestSuite(t *testing.T) {
 }
 
 type FooType struct {
+	Resource
 	Value int `json:"value,omitempty"`
+}
+
+type Resource struct {
+	Id           string `json:"id,omitempty"`
+	ResourceType string `json:"resourceType,omitempty"`
 }
 
 // ========================================================================= //
 // TEST MATCH                                                                //
 // ========================================================================= //
 
-// TODO: Implement a series of fixtures and tests to adequately validate matching.
-
 func (m *MatcherTestSuite) TestMatchBundlesPerfectMatch() {
+	var err error
 
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	leftBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	rightBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	matcher := new(Matcher)
+	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
+	m.NoError(err)
+
+	// There should be no unmatchables and the same number of matches as there are
+	// resources in one of the bundles.
+	m.Len(matches, len(leftBundle.Entry))
+	m.Len(unmatchables, 0)
 }
 
 func (m *MatcherTestSuite) TestMatchBundlesGoodMatch() {
+	var err error
 
+	// These are the same person, with a few discrepancies in their records.
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	leftBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	m.NoError(err)
+	rightBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	matcher := new(Matcher)
+	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
+	m.NoError(err)
+
+	// Most things will match, including the Encounter that has a different timestamp.
+	m.Len(matches, 6)
+
+	for _, match := range matches {
+		if match.ResourceType == "Encounter" {
+			if fhirutil.GetResourceID(match.Left) == "58a4904e97bba945de21eac0" {
+				left, ok := match.Left.(*models.Encounter)
+				m.True(ok)
+				right, ok := match.Right.(*models.Encounter)
+				m.True(ok)
+				m.False(left.Period.Start.Time.Equal(right.Period.Start.Time))
+				m.False(left.Period.End.Time.Equal(right.Period.End.Time))
+
+				m.True(fuzzyTimeMatch(*left.Period.Start, *right.Period.Start))
+				m.True(fuzzyTimeMatch(*left.Period.End, *right.Period.End))
+			}
+		}
+	}
+
+	// A MedicationStatement in the left not present in the right, and is therefore unmatchable.
+	m.Len(unmatchables, 1)
+	um := unmatchables[0]
+	m.Equal("MedicationStatement", fhirutil.GetResourceType(um))
+	m.Equal("58a4904e97bba945de21fac0", fhirutil.GetResourceID(um))
 }
 
 func (m *MatcherTestSuite) TestMatchBundlesPartialMatch() {
+	var err error
 
+	// These are not the same person, but they happened to have similar medications.
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	leftBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/clint_abbott_bundle.json")
+	m.NoError(err)
+	rightBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	matcher := new(Matcher)
+	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
+	m.NoError(err)
+
+	// Most things will not match, but the MedicationStatements will.
+	m.Len(matches, 2)
+	m.Equal("MedicationStatement", matches[0].ResourceType)
+	m.Equal("MedicationStatement", matches[1].ResourceType)
+
+	// Most things will not match. Most striking here is that the Patient didn't match,
+	// so there will be 2 of them.
+	m.Len(unmatchables, 9)
+	pcount := 0
+	for _, resource := range unmatchables {
+		if fhirutil.GetResourceType(resource) == "Patient" {
+			pcount++
+		}
+	}
+	m.Equal(2, pcount)
+
+	// There should also be some encounters.
+	ecount := 0
+	for _, resource := range unmatchables {
+		if fhirutil.GetResourceType(resource) == "Encounter" {
+			ecount++
+		}
+	}
+	m.Equal(3, ecount)
+
+	// And 2 different procedures.
+	pcount = 0
+	for _, resource := range unmatchables {
+		if fhirutil.GetResourceType(resource) == "Procedure" {
+			pcount++
+		}
+	}
+	m.Equal(2, pcount)
 }
 
 func (m *MatcherTestSuite) TestMatchBundlesNoMatch() {
+	var err error
 
+	// There's absolutely nothing in common, so everything should be unmatchable.
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	leftBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/joey_chestnut_bundle.json")
+	m.NoError(err)
+	rightBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	matcher := new(Matcher)
+	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
+	m.NoError(err)
+	m.Len(matches, 0)
+	m.Len(unmatchables, 12)
+
+	// Collectively, all of the left bundle entires and right bundle entries should
+	// be in the unmatchables.
+	for _, entry := range leftBundle.Entry {
+		id := fhirutil.GetResourceID(entry.Resource)
+		found := false
+		for _, um := range unmatchables {
+			if id == fhirutil.GetResourceID(um) {
+				found = true
+			}
+		}
+		m.True(found)
+	}
 }
 
 // ========================================================================= //
@@ -49,7 +191,7 @@ func (m *MatcherTestSuite) TestMatchBundlesNoMatch() {
 // ========================================================================= //
 
 func (m *MatcherTestSuite) TestCollectResources() {
-	fix, err := testutil.LoadFixture("Bundle", "../fixtures/clint_abbot_bundle.json")
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
 	m.NoError(err)
 	m.NotNil(fix)
 	bundle, ok := fix.(*models.Bundle)
@@ -59,14 +201,14 @@ func (m *MatcherTestSuite) TestCollectResources() {
 	m.NoError(err)
 	m.NotNil(resourceMap)
 
-	expectedResourceTypes := []string{"Patient", "Encounter", "Condition", "MedicationStatement"}
+	expectedResourceTypes := []string{"Patient", "Encounter", "Procedure", "Condition", "MedicationStatement"}
 	for _, resourceType := range resourceMap.Keys() {
 		m.True(contains(expectedResourceTypes, resourceType))
 	}
 }
 
 func (m *MatcherTestSuite) TestTraverseResources() {
-	fix, err := testutil.LoadFixture("Bundle", "../fixtures/clint_abbot_bundle.json")
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
 	m.NoError(err)
 	m.NotNil(fix)
 	bundle, ok := fix.(*models.Bundle)
@@ -78,19 +220,23 @@ func (m *MatcherTestSuite) TestTraverseResources() {
 
 	// Traverse the encounters
 	encounterPaths := matcher.traverseResources(resourceMap["Encounter"])
-	m.Len(encounterPaths, 4)
+	m.Len(encounterPaths, 2)
 
 	// Check the paths in one of the resources.
 	expected := []string{
 		"id",
+		"class.code",
+		"type[0].coding[0].system",
+		"type[0].coding[0].code",
+		"patient.type",
+		"patient.referenceid",
+		"period.end",
 		"resourceType",
 		"status",
+		"type[0].coding[0].display",
 		"patient.reference",
 		"patient.external",
 		"period.start",
-		"type[0].coding[0].system",
-		"type[0].coding[0].code",
-		"type[0].text",
 	}
 
 	for _, path := range encounterPaths[0].Keys() {
@@ -145,7 +291,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightNoneRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 1)
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[0], Right: rightResources[0]}, matches[0])
+	m.Equal(Match{Left: leftResources[0], Right: rightResources[0]}, matches[0])
 
 	m.Len(unmatchables, 0)
 }
@@ -183,7 +329,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightRightsRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 1)
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[0], Right: rightResources[1]}, matches[0])
+	m.Equal(Match{Left: leftResources[0], Right: rightResources[1]}, matches[0])
 
 	m.Len(unmatchables, 2)
 	m.Equal([]interface{}{rightResources[0], rightResources[2]}, unmatchables)
@@ -204,7 +350,7 @@ func (m *MatcherTestSuite) TestOneLeftMatchesOneRightLeftsRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 1)
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[2], Right: rightResources[0]}, matches[0])
+	m.Equal(Match{Left: leftResources[2], Right: rightResources[0]}, matches[0])
 
 	m.Len(unmatchables, 2)
 	m.Equal(leftResources[:2], unmatchables)
@@ -227,8 +373,8 @@ func (m *MatcherTestSuite) TestMultipleMatchesRightsRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 2)
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[0], Right: rightResources[0]}, matches[0])
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[1], Right: rightResources[1]}, matches[1])
+	m.Equal(Match{Left: leftResources[0], Right: rightResources[0]}, matches[0])
+	m.Equal(Match{Left: leftResources[1], Right: rightResources[1]}, matches[1])
 
 	m.Len(unmatchables, 2)
 	m.Equal(rightResources[2:], unmatchables)
@@ -251,8 +397,8 @@ func (m *MatcherTestSuite) TestMultipleMatchesLeftsRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 2)
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[1], Right: rightResources[0]}, matches[0])
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[2], Right: rightResources[1]}, matches[1])
+	m.Equal(Match{Left: leftResources[1], Right: rightResources[0]}, matches[0])
+	m.Equal(Match{Left: leftResources[2], Right: rightResources[1]}, matches[1])
 
 	m.Len(unmatchables, 2)
 	m.Equal([]interface{}{leftResources[0], leftResources[3]}, unmatchables)
@@ -277,8 +423,8 @@ func (m *MatcherTestSuite) TestMultipleMatchesBothRemaining() {
 
 	m.NoError(err)
 	m.Len(matches, 2)
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[1], Right: rightResources[1]}, matches[0])
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[3], Right: rightResources[3]}, matches[1])
+	m.Equal(Match{Left: leftResources[1], Right: rightResources[1]}, matches[0])
+	m.Equal(Match{Left: leftResources[3], Right: rightResources[3]}, matches[1])
 
 	m.Len(unmatchables, 4)
 	m.Equal([]interface{}{leftResources[0], leftResources[2], rightResources[0], rightResources[2]}, unmatchables)
@@ -302,7 +448,7 @@ func (m *MatcherTestSuite) TestMultipleMatchesOrderOfPreference() {
 
 	m.NoError(err)
 	m.Len(matches, 1)
-	m.Equal(Match{ResourceType: "FooType", Left: leftResources[1], Right: rightResources[1]}, matches[0])
+	m.Equal(Match{Left: leftResources[1], Right: rightResources[1]}, matches[0])
 
 	m.Len(unmatchables, 3)
 	m.Equal([]interface{}{leftResources[0], rightResources[0], rightResources[2]}, unmatchables)
@@ -313,10 +459,10 @@ func (m *MatcherTestSuite) TestMultipleMatchesOrderOfPreference() {
 // ========================================================================= //
 
 func (m *MatcherTestSuite) TestComparePathsMatchAboveThreshold() {
-	fix1, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnston_patient.json")
+	fix1, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnston_patient.json")
 	m.NoError(err)
 
-	fix2, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnson_patient.json")
+	fix2, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnson_patient.json")
 	m.NoError(err)
 
 	// Build paths for each patient.
@@ -327,10 +473,10 @@ func (m *MatcherTestSuite) TestComparePathsMatchAboveThreshold() {
 }
 
 func (m *MatcherTestSuite) TestComparePathsNoMatchBelowThreshold() {
-	fix1, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnston_patient.json")
+	fix1, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnston_patient.json")
 	m.NoError(err)
 
-	fix2, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
+	fix2, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
 	m.NoError(err)
 
 	// Build paths for each patient.
@@ -341,10 +487,10 @@ func (m *MatcherTestSuite) TestComparePathsNoMatchBelowThreshold() {
 }
 
 func (m *MatcherTestSuite) TestComparePathsMatchLowThresholdNoMatchHighThreshold() {
-	fix1, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnston_patient.json")
+	fix1, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnston_patient.json")
 	m.NoError(err)
 
-	fix2, err := testutil.LoadFixture("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
+	fix2, err := fhirutil.LoadResource("Patient", "../fixtures/patients/bernard_johnstone_patient.json")
 	m.NoError(err)
 
 	matcher := new(Matcher)
@@ -423,12 +569,21 @@ func (m *MatcherTestSuite) TestMatchTimeValues() {
 	matcher := new(Matcher)
 
 	t := time.Now().UTC()
-	t1 := reflect.ValueOf(t)
-	t2 := reflect.ValueOf(t)
-	m.True(matcher.matchValues(t1, t2))
+	t1 := models.FHIRDateTime{
+		Time:      t,
+		Precision: models.Timestamp,
+	}
+	t2 := models.FHIRDateTime{
+		Time:      t,
+		Precision: models.Timestamp,
+	}
+	m.True(matcher.matchValues(reflect.ValueOf(t1), reflect.ValueOf(t2)))
 
-	t3 := reflect.ValueOf(time.Now().UTC())
-	m.True(matcher.matchValues(t1, t3))
+	t3 := models.FHIRDateTime{
+		Time:      time.Now().UTC(),
+		Precision: models.Timestamp,
+	}
+	m.True(matcher.matchValues(reflect.ValueOf(t1), reflect.ValueOf(t3)))
 }
 
 func (m *MatcherTestSuite) TestMatchDifferentKindsAlwaysFalse() {
@@ -462,17 +617,32 @@ func (m *MatcherTestSuite) TestFuzzyFloatMatch() {
 
 func (m *MatcherTestSuite) TestFuzzyTimeMatchUTC() {
 	// Same day, different time of day.
-	t1 := time.Date(2017, 2, 10, 4, 13, 54, 0, time.UTC)
-	t2 := time.Date(2017, 2, 10, 13, 24, 11, 0, time.UTC)
+	t1 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 10, 4, 13, 54, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
+	t2 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 10, 13, 24, 11, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
 	m.True(fuzzyTimeMatch(t1, t2))
 
 	// Different days should fail.
-	t3 := time.Date(2017, 2, 9, 6, 45, 33, 0, time.UTC)
+	t3 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 9, 6, 45, 33, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
 	m.False(fuzzyTimeMatch(t1, t3))
 
 	// The extremes of a callendar day should still match.
-	t4 := time.Date(2017, 1, 31, 0, 0, 0, 0, time.UTC)
-	t5 := time.Date(2017, 1, 31, 23, 59, 59, 0, time.UTC)
+	t4 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 0, 0, 0, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
+	t5 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 23, 59, 59, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
 	m.True(fuzzyTimeMatch(t4, t5))
 }
 
@@ -481,20 +651,38 @@ func (m *MatcherTestSuite) TestFuzzyTimeMatchEST() {
 	m.NoError(err)
 
 	// Same day, different time of day.
-	t1 := time.Date(2017, 2, 10, 4, 13, 54, 0, loc)
-	t2 := time.Date(2017, 2, 10, 13, 24, 11, 0, loc)
+	t1 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 10, 4, 13, 54, 0, loc),
+		Precision: models.Timestamp,
+	}
+	t2 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 10, 13, 24, 11, 0, loc),
+		Precision: models.Timestamp,
+	}
 	m.True(fuzzyTimeMatch(t1, t2))
 
 	// Different days should fail.
-	t3 := time.Date(2017, 2, 9, 6, 45, 33, 0, loc)
+	t3 := models.FHIRDateTime{
+		Time:      time.Date(2017, 2, 9, 6, 45, 33, 0, loc),
+		Precision: models.Timestamp,
+	}
 	m.False(fuzzyTimeMatch(t1, t3))
 
 	// The extremes of a callendar day should still match.
-	t4 := time.Date(2017, 1, 31, 0, 0, 0, 0, loc)
-	t5 := time.Date(2017, 1, 31, 23, 59, 59, 0, loc)
+	t4 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 0, 0, 0, 0, loc),
+		Precision: models.Timestamp,
+	}
+	t5 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 23, 59, 59, 0, loc),
+		Precision: models.Timestamp,
+	}
 	m.True(fuzzyTimeMatch(t4, t5))
 
-	// Cannot reliably match times from different locations.
-	t6 := time.Date(2017, 1, 31, 4, 15, 32, 0, time.UTC)
-	m.False(fuzzyTimeMatch(t4, t6))
+	// Can reliably match times from different locations.
+	t6 := models.FHIRDateTime{
+		Time:      time.Date(2017, 1, 31, 4, 15, 32, 0, time.UTC),
+		Precision: models.Timestamp,
+	}
+	m.True(fuzzyTimeMatch(t4, t6))
 }

@@ -1,0 +1,142 @@
+{
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+        {
+            "resource": {
+                "resourceType": "Patient",
+                "id": "58a4904e97bba945de21eac8",
+                "name": [
+                    {
+                        "given": ["Joseph"],
+                        "family": "Chestnut"
+                    }
+                ],
+                "gender": "male",
+                "birthDate": "1977-01-06",
+                "maritalStatus": {
+                    "coding": [
+                        {
+                            "system": "http://hl7.org/fhir/v3/MaritalStatus",
+                            "code": "D",
+                            "display": "Divorced"
+                        }
+                    ]
+                },
+                "address": [
+                    {
+                        "use": "home",
+                        "line": ["300 Centurion Blvd"],
+                        "city": "Los Alamos",
+                        "state": "TX",
+                        "postal": "76453"
+                    }
+                ],
+                "telecom": [
+                    {
+                        "system": "phone",
+                        "value": "406.531.9696",
+                        "use": "home"
+                    }
+                ]
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Condition",
+                "id": "58a4904e07bca945de21eac8",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "195967001",
+                            "display": "Asthma"
+                        }
+                    ]
+                },
+                "onsetDateTime": "2000-05-21",
+                "subject": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Encounter",
+                "id": "58a4904e97bba945ee21eac8",
+                "status": "finished",
+                "period": {
+                    "start": "2016-04-13",
+                    "end": "2016-04-13"
+                },
+                "class": {
+                    "code": "outpatient"
+                },
+                "type": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://snomed.info/sct",
+                                "code": "185349003",
+                                "display": "Encounter for problem"
+                            }
+                        ]
+                    }
+                ],
+                "patient": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Encounter",
+                "id": "58a4904e97bba945de21eac0",
+                "status": "finished",
+                "period": {
+                    "start": "2014-08-03",
+                    "end": "2014-08-03"
+                },
+                "class": {
+                    "code": "outpatient"
+                },
+                "type": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://snomed.info/sct",
+                                "code": "185349003",
+                                "display": "Encounter for problem"
+                            }
+                        ]
+                    }
+                ],
+                "patient": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "MedicationStatement",
+                "id": "58a4904e97bba945de21fac0",
+                "status": "active",
+                "medicationCodeableConcept": {
+                    "coding": [
+                        {
+                            "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                            "code": "895994",
+                            "display": "120 ACTUAT Fluticasone propionate 0.044 MG/ACTUAT Metered Dose Inhaler"
+                        }
+                    ]
+                },
+                "subject": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                },
+                "effectivePeriod": {
+                    "start": "2000-05-21"
+                }
+            }
+        }
+    ]
+}

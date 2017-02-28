@@ -2,32 +2,41 @@ package merge
 
 import (
 	"reflect"
-	"time"
 
 	"gopkg.in/mgo.v2/bson"
 
 	"github.com/intervention-engine/fhir/models"
+	"github.com/mitre/ptmerge/fhirutil"
 )
 
 // Detector provides tools for detecting all conflicts between 2 resources in a Match.
 type Detector struct{}
 
-// AllConflicts identifies all conflicts between a set of Matches, returning an OperationOutcome for
-// each match detailing the location(s) of conflicts between the resources in the Match.
-func (d *Detector) AllConflicts(matches []Match) (conflicts []models.OperationOutcome, err error) {
-	for _, match := range matches {
-		conflict, err := d.findConflicts(&match)
-		if err != nil {
-			return nil, err
-		}
-		if conflict != nil {
-			conflicts = append(conflicts, *conflict)
-		}
+// Conflicts identifies all conflicts in a Match, returning a target resource
+// and any conflicts between Left and Right.
+func (d *Detector) Conflicts(match *Match) (targetResource interface{}, conflict *models.OperationOutcome) {
+
+	// Identify any conflicts between Left and Right.
+	conflictPaths := d.findConflictPaths(match)
+
+	// Create a new target. For simplicity, use the Left resource.
+	target := match.Left
+
+	// Give it a new ID.
+	targetID := bson.NewObjectId().Hex()
+	fhirutil.SetResourceID(target, targetID)
+
+	if len(conflictPaths) > 0 {
+		// Build an OperationOutcome detailing the conflicts.
+		conflict = fhirutil.OperationOutcome(fhirutil.GetResourceType(target), targetID, conflictPaths)
 	}
-	return conflicts, nil
+	return target, conflict
 }
 
-func (d *Detector) findConflicts(match *Match) (conflict *models.OperationOutcome, err error) {
+// findConflictPaths finds all non-nil paths in both resources comprising a Match. It then identifies
+// which paths have a conflict, and which paths do not.
+func (d *Detector) findConflictPaths(match *Match) (conflictPaths []string) {
+
 	// First, find all non-nil paths in the left resource, and the values at those paths.
 	leftPaths := make(PathMap)
 	traverse(reflect.ValueOf(match.Left), leftPaths, "")
@@ -42,26 +51,18 @@ func (d *Detector) findConflicts(match *Match) (conflict *models.OperationOutcom
 	leftOnlyPaths := setDiff(leftPaths.Keys(), rightPaths.Keys())  // L not in R
 	rightOnlyPaths := setDiff(rightPaths.Keys(), leftPaths.Keys()) // R not in L
 
-	// Find conflicts between the common paths.
-	locations := []string{}
-
+	// Find conflictPaths and noConflictPaths between the common paths.
 	for _, cp := range commonPaths {
-		// Unless the values are EXACTLY the same, we mark them as a conflict.
+		// Unless the values exactly match, we count them as a conflict.
 		if !d.compareValues(leftPaths[cp], rightPaths[cp]) {
-			locations = append(locations, cp)
+			conflictPaths = append(conflictPaths, cp)
 		}
 	}
 
 	// Left-only and right-only paths are automatically conflicts.
-	locations = append(locations, leftOnlyPaths...)
-	locations = append(locations, rightOnlyPaths...)
-
-	// Build a new OperationOutcome detailing all conflicts for this match.
-	if len(locations) > 0 {
-		return d.createConflictOperationOutcome(locations), nil
-	}
-	// No conflicts found
-	return nil, nil
+	conflictPaths = append(conflictPaths, leftOnlyPaths...)
+	conflictPaths = append(conflictPaths, rightOnlyPaths...)
+	return conflictPaths
 }
 
 // compareValues compares 2 reflected values obtained by traversing FHIR resources. The values
@@ -89,39 +90,19 @@ func (d *Detector) compareValues(left, right reflect.Value) bool {
 	case reflect.Bool:
 		return left.Bool() == right.Bool()
 
-	// This is only for time.Time objects, all other structs should have been traversed.
+	// This is only for models.FHIRDateTime objects, all other structs should have been traversed.
 	case reflect.Struct:
-		leftTime, ok := left.Interface().(time.Time)
+		leftTime, ok := left.Interface().(models.FHIRDateTime)
 		if !ok {
 			return false
 		}
-		rightTime, ok := right.Interface().(time.Time)
+		rightTime, ok := right.Interface().(models.FHIRDateTime)
 		if !ok {
 			return false
 		}
-		return leftTime.Equal(rightTime)
+		return leftTime.Time.Equal(rightTime.Time)
 
 	default:
 		return false
 	}
-}
-
-func (d *Detector) createConflictOperationOutcome(locations []string) *models.OperationOutcome {
-	outcome := &models.OperationOutcome{
-		DomainResource: models.DomainResource{
-			Resource: models.Resource{
-				Id:           bson.NewObjectId().Hex(),
-				ResourceType: "OperationOutcome",
-			},
-		},
-		Issue: []models.OperationOutcomeIssueComponent{
-			models.OperationOutcomeIssueComponent{
-				Severity: "information",
-				Code:     "conflict",
-				Location: locations,
-			},
-		},
-	}
-
-	return outcome
 }
