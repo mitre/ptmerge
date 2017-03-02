@@ -1,0 +1,192 @@
+{
+    "resourceType": "Bundle",
+    "type": "transaction",
+    "entry": [
+        {
+            "fullUrl": "urn:uuid:f085df6e-827e-4f2e-a672-b65a1d1094ac",
+            "resource": {
+                "resourceType": "Patient",
+                "id": "58a4904e97bba945de21eac8",
+                "name": [
+                    {
+                        "given": ["Lowell"],
+                        "family": "Abbott"
+                    }
+                ],
+                "gender": "male",
+                "birthDate": "1950-09-02",
+                "maritalStatus": {
+                    "coding": [
+                        {
+                            "system": "http://hl7.org/fhir/v3/MaritalStatus",
+                            "code": "S",
+                            "display": "Never Married"
+                        }
+                    ]
+                },
+                "address": [
+                    {
+                        "use": "home",
+                        "line": ["1 MITRE Way"],
+                        "city": "Bedford",
+                        "state": "MA",
+                        "postal": "02144"
+                    }
+                ],
+                "telecom": [
+                    {
+                        "system": "phone",
+                        "value": "215.449.5403 x04021",
+                        "use": "home"
+                    }
+                ]
+            },
+            "request": {
+                "method": "POST",
+                "url": "Patient"
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:9e423ddc-745c-44f4-85f4-3ee541a7cbdd",
+            "resource": {
+                "resourceType": "Condition",
+                "id": "9e423ddc-745c-44f4-85f4-3ee541a7cbdd",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "44054006",
+                            "display": "Diabetes"
+                        }
+                    ]
+                },
+                "onsetDateTime": "2016-11-01",
+                "subject": {
+                    "reference": "urn:uuid:f085df6e-827e-4f2e-a672-b65a1d1094ac"
+                }
+            },
+            "request": {
+                "method": "POST",
+                "url": "Condition"
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:9c69c5c4-da30-48a5-a9f4-5cfbef64b8fb",
+            "resource": {
+                "resourceType": "Encounter",
+                "id": "9c69c5c4-da30-48a5-a9f4-5cfbef64b8fb",
+                "status": "finished",
+                "period": {
+                    "start": "2016-11-01",
+                    "end": "2016-11-01"
+                },
+                "class": {
+                    "code": "outpatient"
+                },
+                "type": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://snomed.info/sct",
+                                "code": "185349003",
+                                "display": "Encounter for problem"
+                            }
+                        ]
+                    }
+                ],
+                "patient": {
+                    "reference": "urn:uuid:f085df6e-827e-4f2e-a672-b65a1d1094ac"
+                }
+            },
+            "request": {
+                "method": "POST",
+                "url": "Encounter"
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:25342a53-42af-46f8-9293-6c9aa516c51e",
+            "resource": {
+                "resourceType": "Encounter",
+                "id": "58a4904e97bba945de21eac0",
+                "status": "finished",
+                "period": {
+                    "start": "2014-03-15T16:09:32-05:00",
+                    "end": "2014-03-15T17:11:41-05:00"
+                },
+                "class": {
+                    "code": "outpatient"
+                },
+                "type": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://snomed.info/sct",
+                                "code": "185349003",
+                                "display": "Encounter for problem"
+                            }
+                        ]
+                    }
+                ],
+                "patient": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                }
+            },
+            "request": {
+                "method": "POST",
+                "url": "Encounter"
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:da20961a-3049-4cce-bafc-92258de3c25a",
+            "resource": {
+                "resourceType": "MedicationStatement",
+                "id": "da20961a-3049-4cce-bafc-92258de3c25a",
+                "status": "active",
+                "medicationCodeableConcept": {
+                    "coding": [
+                        {
+                            "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                            "code": "860975",
+                            "display": "24 HR Metformin hydrochloride 500 MG Extended Release Oral Tablet"
+                        }
+                    ]
+                },
+                "subject": {
+                    "reference": "urn:uuid:f085df6e-827e-4f2e-a672-b65a1d1094ac"
+                },
+                "effectivePeriod": {
+                    "start": "2016-11-01"
+                }
+            },
+            "request": {
+                "method": "POST",
+                "url": "MedicationStatement"
+            }
+        },
+        {
+            "fullUrl": "urn:uuid:da20961a-3049-4cce-bafc-92258de3c25a",
+            "resource": {
+                "resourceType": "Procedure",
+                "id": "da20961a-3049-4cce-bafc-92258de3c25a",
+                "status": "completed",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "16254007",
+                            "display": "Lipid panel"
+                        }
+                    ]
+                },
+                "subject": {
+                    "reference": "urn:uuid:f085df6e-827e-4f2e-a672-b65a1d1094ac"
+                },
+                "performedDateTime": "2016-11-01"
+            },
+            "request": {
+                "method": "POST",
+                "url": "Procedure"
+            }
+        }
+    ]
+}
