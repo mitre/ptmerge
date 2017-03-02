@@ -168,7 +168,7 @@ func (m *MatcherTestSuite) TestMatchBundlesNoMatch() {
 	matcher := new(Matcher)
 	_, _, err = matcher.Match(leftBundle, rightBundle)
 	m.Error(err)
-	m.Equal(errors.New("Patient resource(s) do not match"), err)
+	m.Equal(errors.New("Patient resources do not match"), err)
 }
 
 // ========================================================================= //

@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -69,16 +70,318 @@ func (s *ServerTestSuite) TearDownTest() {
 // ========================================================================= //
 
 func (s *ServerTestSuite) TestMergeNoConflicts() {
-	s.T().Skip()
+	// Post the source bundles.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created, err = fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	// Get a count of the number of merge states in Mongo.
+	mergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusOK, res.StatusCode)
+
+	// Unmarshal and check the body.
+	bundle := models.Bundle{}
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	err = json.Unmarshal(body, &bundle)
+	s.NoError(err)
+
+	s.Len(bundle.Entry, 7)
+
+	// Check that the merges in mongo weren't updated or changed.
+	newCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+	s.Equal(mergeCount, newCount)
 }
 
 func (s *ServerTestSuite) TestMergeSomeConflicts() {
-	s.T().Skip()
+	// The outcome should be a set of conflicts.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Get a count of the number of merge states in Mongo.
+	mergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusCreated, res.StatusCode)
+
+	// Unmarshal and check the body.
+	outcome := models.Bundle{}
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	err = json.Unmarshal(body, &outcome)
+	s.NoError(err)
+
+	// Validate the bundle of OperationOutcomes. There should be 2 conflicts:
+	// 2 paths in the Patient resource and 2 paths in an Encounter resource.
+	var patientConflictID, encounterConflictID string
+	var patientTargetID, encounterTargetID string
+
+	s.Len(outcome.Entry, 2)
+	for _, entry := range outcome.Entry {
+		oo, ok := entry.Resource.(*models.OperationOutcome)
+		s.True(ok)
+
+		s.Len(oo.Issue, 1)
+		issue := oo.Issue[0]
+		s.Equal("information", issue.Severity)
+		s.Equal("conflict", issue.Code)
+		s.Len(issue.Location, 2)
+		s.NotEmpty(issue.Diagnostics)
+
+		// Validate the Patient conflicts.
+		if strings.Contains(issue.Diagnostics, "Patient") {
+			// Reference to the new Patient resource in the target bundle.
+			s.NotEmpty(issue.Diagnostics)
+			parts := strings.SplitN(issue.Diagnostics, ":", 2)
+			s.Equal("Patient", parts[0])
+			s.NotEmpty(parts[1])
+			s.Len(parts[1], len(bson.NewObjectId().Hex()))
+
+			for _, loc := range issue.Location {
+				s.True(contains([]string{"maritalStatus.coding[0].display", "maritalStatus.coding[0].code"}, loc))
+			}
+			patientConflictID = oo.Id
+			patientTargetID = parts[1]
+			continue
+		}
+
+		// Validate the Encounter conflicts.
+		if strings.Contains(issue.Diagnostics, "Encounter") {
+			// Reference to the new Encounter resource in the target bundle.
+			s.NotEmpty(issue.Diagnostics)
+			parts := strings.SplitN(issue.Diagnostics, ":", 2)
+			s.Equal("Encounter", parts[0])
+			s.NotEmpty(parts[1])
+			s.Len(parts[1], len(bson.NewObjectId().Hex()))
+
+			for _, loc := range issue.Location {
+				s.True(contains([]string{"period.start", "period.end"}, loc))
+			}
+			encounterConflictID = oo.Id
+			encounterTargetID = parts[1]
+			continue
+		}
+	}
+
+	// Check that the merge ID is in the Location header
+	mergeID := res.Header.Get("Location")
+	s.NotEmpty(mergeID)
+
+	// Check that the target bundle exists and contains the expected resources.
+	res, err = http.Get(s.PTMergeServer.URL + "/merge/" + mergeID + "/target")
+	s.NoError(err)
+
+	// Unmarshal and check the body.
+	targetBundle := models.Bundle{}
+	body, err = ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	err = json.Unmarshal(body, &targetBundle)
+	s.NoError(err)
+
+	s.Len(targetBundle.Entry, 7)
+
+	// There should be one Patient.
+	pcount := 0
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "Patient" {
+			pcount++
+		}
+	}
+	s.Equal(1, pcount)
+
+	// There should also be 2 Encounters.
+	ecount := 0
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "Encounter" {
+			ecount++
+		}
+	}
+	s.Equal(2, ecount)
+
+	// And 1 Procedure.
+	pcount = 0
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "Procedure" {
+			pcount++
+		}
+	}
+	s.Equal(1, pcount)
+
+	// And 2 MedicationStatements.
+	mcount := 0
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "MedicationStatement" {
+			mcount++
+		}
+	}
+	s.Equal(2, mcount)
+
+	// Check that the merge metadata was updated.
+	newMergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+	s.Equal(mergeCount+1, newMergeCount)
+
+	// Get the merge metadata.
+	mergeState := &state.MergeState{}
+	err = s.DB().C("merges").FindId(mergeID).One(mergeState)
+	s.NoError(err)
+
+	// Validate the mergeState.
+	s.Equal(mergeID, mergeState.MergeID)
+	s.Equal(s.FHIRServer.URL+"/Bundle/"+targetBundle.Id, mergeState.TargetURL)
+	s.False(mergeState.Completed)
+	s.Len(mergeState.Conflicts, 2)
+
+	// Patient conflict metadata.
+	pc, ok := mergeState.Conflicts[patientConflictID]
+	s.True(ok)
+	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+patientConflictID, pc.OperationOutcomeURL)
+	s.False(pc.Resolved)
+	s.Equal("Patient", pc.TargetResource.ResourceType)
+	s.Equal(patientTargetID, pc.TargetResource.ResourceID)
+
+	// Encounter conflict metadata.
+	ec, ok := mergeState.Conflicts[encounterConflictID]
+	s.True(ok)
+	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+encounterConflictID, ec.OperationOutcomeURL)
+	s.False(ec.Resolved)
+	s.Equal("Encounter", ec.TargetResource.ResourceType)
+	s.Equal(encounterTargetID, ec.TargetResource.ResourceID)
 }
 
-func (s *ServerTestSuite) TestMergeImbalanceLeftAndRight() {
-	// There are many resources in the left not in the right, and vise versa.
-	s.T().Skip()
+func (s *ServerTestSuite) TestMergePatientsDontMatch() {
+	// If the patient resources don't match the merge is rejected.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/joey_chestnut_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Get a count of the number of merge states in Mongo.
+	mergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusBadRequest, res.StatusCode)
+
+	// Unmarshal and check the body.
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	s.Equal("Patient resources do not match", string(body))
+
+	// Make sure mongo wasn't updated.
+	newMergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+	s.Equal(mergeCount, newMergeCount)
+}
+
+func (s *ServerTestSuite) TestMergeFromBatch() {
+	// The bundles here come from queries of the from /Patient/:patient_id/$everything.
+	// In practice, these are bundles formed by the server as a union of _include and _revinclude.
+	// The actually merge process should be agnostic of this and work the same as before.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "", "../fixtures/batch/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "", "../fixtures/batch/lowell_abbott_unmarried_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Get a count of the number of merge states in Mongo.
+	mergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+
+	// Get the ID of the patient in the leftBundle
+	var leftPatientID, rightPatientID string
+
+	for _, entry := range leftBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "Patient" {
+			patient, ok := entry.Resource.(*models.Patient)
+			s.True(ok)
+			leftPatientID = patient.Id
+		}
+	}
+
+	// And the right
+	for _, entry := range rightBundle.Entry {
+		if fhirutil.GetResourceType(entry.Resource) == "Patient" {
+			patient, ok := entry.Resource.(*models.Patient)
+			s.True(ok)
+			rightPatientID = patient.Id
+		}
+	}
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Patient/" + leftPatientID + "/$everything"
+	source2 := s.FHIRServer.URL + "/Patient/" + rightPatientID + "/$everything"
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusCreated, res.StatusCode)
+
+	// Mongo should have been updated.
+	newMergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+	s.Equal(mergeCount+1, newMergeCount)
 }
 
 // ========================================================================= //
@@ -86,11 +389,254 @@ func (s *ServerTestSuite) TestMergeImbalanceLeftAndRight() {
 // ========================================================================= //
 
 func (s *ServerTestSuite) TestResolveConflictConflictResolved() {
-	s.T().Skip()
+	var err error
+
+	// Setup a merge with unresolved conflicts.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusCreated, res.StatusCode)
+
+	// Unmarshal and check the body.
+	outcome := models.Bundle{}
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	err = json.Unmarshal(body, &outcome)
+	s.NoError(err)
+
+	// Get a count of the number of merge states in Mongo.
+	mergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+
+	// Get the diagnostic info from the Patient conflict.
+	found := false
+	var targetPatientID string
+	var oo *models.OperationOutcome
+	for _, entry := range outcome.Entry {
+		oo, ok = entry.Resource.(*models.OperationOutcome)
+		s.True(ok)
+		s.Len(oo.Issue, 1)
+		if strings.Contains(oo.Issue[0].Diagnostics, "Patient") {
+			found = true
+			parts := strings.SplitN(oo.Issue[0].Diagnostics, ":", 2)
+			targetPatientID = parts[1]
+			break
+		}
+	}
+	s.True(found)
+	s.NotEmpty(targetPatientID)
+
+	// Get the merge ID.
+	mergeID := res.Header.Get("Location")
+	s.NotEmpty(mergeID)
+
+	// Post the patient resource that resolves the conflict.
+	patientResource, err := fhirutil.LoadResource("Patient", "../fixtures/patients/lowell_abbott.json")
+	data, err := json.Marshal(patientResource)
+	s.NoError(err)
+	s.NotEmpty(data)
+
+	req, err = http.NewRequest("POST", s.PTMergeServer.URL+"/merge/"+mergeID+"/resolve/"+oo.Id, bytes.NewReader(data))
+	s.NoError(err)
+	res, err = http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	// Get the target bundle and check that it was updated.
+	target, err := fhirutil.GetResourceByURL("Bundle", s.PTMergeServer.URL+"/merge/"+mergeID+"/target")
+	s.NoError(err)
+	targetBundle, ok := target.(*models.Bundle)
+	s.True(ok)
+
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceID(entry.Resource) == targetPatientID {
+			postedPatient, ok := patientResource.(*models.Patient)
+			s.True(ok)
+			targetPatient, ok := entry.Resource.(*models.Patient)
+			s.True(ok)
+			s.Equal(postedPatient.Name, targetPatient.Name)
+			s.Equal(postedPatient.Telecom, targetPatient.Telecom)
+			s.Equal(postedPatient.BirthDate, targetPatient.BirthDate)
+			s.Equal(postedPatient.MaritalStatus, targetPatient.MaritalStatus)
+			break
+		}
+	}
+
+	// Check that the merge metadata was updated.
+	newMergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+	s.Equal(mergeCount, newMergeCount)
+
+	// Get the merge metadata.
+	mergeState := &state.MergeState{}
+	err = s.DB().C("merges").FindId(mergeID).One(mergeState)
+	s.NoError(err)
+
+	// Validate the mergeState.
+	s.Equal(mergeID, mergeState.MergeID)
+	s.Equal(s.FHIRServer.URL+"/Bundle/"+targetBundle.Id, mergeState.TargetURL)
+	s.False(mergeState.Completed)
+	s.Len(mergeState.Conflicts, 2)
+
+	// The patient conflict should now be resolved.
+	pc, ok := mergeState.Conflicts[oo.Id]
+	s.True(ok)
+	s.Equal(s.FHIRServer.URL+"/OperationOutcome/"+oo.Id, pc.OperationOutcomeURL)
+	s.True(pc.Resolved)
+	s.Equal("Patient", pc.TargetResource.ResourceType)
+	s.Equal(targetPatientID, pc.TargetResource.ResourceID)
 }
 
 func (s *ServerTestSuite) TestResolveConflictNoMoreConflicts() {
-	s.T().Skip()
+	var err error
+
+	// Setup a merge with unresolved conflicts.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusCreated, res.StatusCode)
+
+	// Unmarshal and check the body.
+	outcome := models.Bundle{}
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	err = json.Unmarshal(body, &outcome)
+	s.NoError(err)
+
+	// Get a count of the number of merge states in Mongo.
+	mergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+
+	// Get the diagnostic info from the Patient conflict.
+	found := false
+	var patientConflictID, encounterConflictID string
+	var targetPatientID, targetEncounterID string
+	var oo *models.OperationOutcome
+	for _, entry := range outcome.Entry {
+		oo, ok = entry.Resource.(*models.OperationOutcome)
+		s.True(ok)
+		s.Len(oo.Issue, 1)
+		if strings.Contains(oo.Issue[0].Diagnostics, "Patient") {
+			found = true
+			parts := strings.SplitN(oo.Issue[0].Diagnostics, ":", 2)
+			targetPatientID = parts[1]
+			patientConflictID = oo.Id
+		}
+		if strings.Contains(oo.Issue[0].Diagnostics, "Encounter") {
+			found = true
+			parts := strings.SplitN(oo.Issue[0].Diagnostics, ":", 2)
+			targetEncounterID = parts[1]
+			encounterConflictID = oo.Id
+		}
+		s.True(found)
+	}
+	s.NotEmpty(targetPatientID)
+	s.NotEmpty(targetEncounterID)
+
+	// Get the merge ID.
+	mergeID := res.Header.Get("Location")
+	s.NotEmpty(mergeID)
+
+	// Post the patient resource that resolves the conflict.
+	patientResource, err := fhirutil.LoadResource("Patient", "../fixtures/patients/lowell_abbott.json")
+	data, err := json.Marshal(patientResource)
+	s.NoError(err)
+	s.NotEmpty(data)
+
+	req, err = http.NewRequest("POST", s.PTMergeServer.URL+"/merge/"+mergeID+"/resolve/"+patientConflictID, bytes.NewReader(data))
+	s.NoError(err)
+	res, err = http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+	s.Equal(http.StatusOK, res.StatusCode)
+
+	// Post the encounter resource that resolves the other conflict.
+	encounterResource, err := fhirutil.LoadResource("Encounter", "../fixtures/encounters/encounter_1.json")
+	data, err = json.Marshal(encounterResource)
+	s.NoError(err)
+	s.NotEmpty(data)
+
+	req, err = http.NewRequest("POST", s.PTMergeServer.URL+"/merge/"+mergeID+"/resolve/"+encounterConflictID, bytes.NewReader(data))
+	s.NoError(err)
+	res, err = http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+	s.Equal(http.StatusOK, res.StatusCode)
+
+	// The body of this second response should be the target bundle, since all conflicts are now resolved.
+	outcome = models.Bundle{}
+	body, err = ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	err = json.Unmarshal(body, &outcome)
+	s.NoError(err)
+
+	// Get the target bundle and check that it was updated.
+	target, err := fhirutil.GetResourceByURL("Bundle", s.PTMergeServer.URL+"/merge/"+mergeID+"/target")
+	s.NoError(err)
+	targetBundle, ok := target.(*models.Bundle)
+	s.True(ok)
+
+	// The target bundle and outcome should match.
+	s.Equal(len(outcome.Entry), 7)
+	s.Equal(len(targetBundle.Entry), len(outcome.Entry))
+
+	// The merge metadata should still be available.
+	newMergeCount, err := s.DB().C("merges").Count()
+	s.NoError(err)
+	s.Equal(mergeCount, newMergeCount)
+
+	// Get the merge metadata.
+	mergeState := &state.MergeState{}
+	err = s.DB().C("merges").FindId(mergeID).One(mergeState)
+	s.NoError(err)
+
+	// Validate the mergeState.
+	s.Equal(mergeID, mergeState.MergeID)
+	s.Equal(s.FHIRServer.URL+"/Bundle/"+targetBundle.Id, mergeState.TargetURL)
+	s.True(mergeState.Completed)
+	s.Len(mergeState.Conflicts, 2)
+
+	// The patient conflict should now be resolved.
+	for _, conflictID := range mergeState.Conflicts.Keys() {
+		conflict := mergeState.Conflicts[conflictID]
+		s.True(conflict.Resolved)
+	}
 }
 
 func (s *ServerTestSuite) TestResolveConflictMergeNotFound() {
@@ -1092,4 +1638,14 @@ func (s *ServerTestSuite) insertMergeState(mergeState *state.MergeState) (mergeI
 		return "", err
 	}
 	return mergeState.MergeID, nil
+}
+
+// contains tests if an element is in the set.
+func contains(set []string, el string) bool {
+	for _, item := range set {
+		if item == el {
+			return true
+		}
+	}
+	return false
 }

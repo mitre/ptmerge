@@ -297,13 +297,23 @@ func LoadAndPostResource(host, resourceType, filepath string) (created interface
 	if err != nil {
 		return nil, err
 	}
-	res, err := http.Post(host+"/"+resourceType, "application/fhir+json", bytes.NewBuffer(data))
+
+	var url string
+	if resourceType == "" {
+		// This is a batch operation
+		url = host
+		resourceType = "Bundle"
+	} else {
+		url = host + "/" + resourceType
+	}
+
+	res, err := http.Post(url, "application/fhir+json", bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode != http.StatusCreated {
+	if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Failed to create resource %s", resourceType)
 	}
 
@@ -311,6 +321,7 @@ func LoadAndPostResource(host, resourceType, filepath string) (created interface
 	if err != nil {
 		return nil, err
 	}
+
 	created = models.NewStructForResourceName(resourceType)
 	err = json.Unmarshal(body, &created)
 	if err != nil {

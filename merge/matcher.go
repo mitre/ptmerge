@@ -23,6 +23,10 @@ var (
 	// MatchThreshold is the total percentage of non-nil paths in a resource that must
 	// match for the whole resource to be considered a match.
 	MatchThreshold = 0.8
+
+	// ErrNoPatientMatch indicates that the patient resources in the bundles didn't exist or didn't match.
+	// A merge cannot continue if there aren't minimally matching patients.
+	ErrNoPatientMatch = errors.New("Patient resources do not match")
 )
 
 // Matcher provides tools for identifying all resources in 2 source bundles that "match".
@@ -83,7 +87,7 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 
 		if resourceType == "Patient" && len(someMatches) == 0 {
 			// There was no matching Patient resource.
-			return nil, nil, errors.New("Patient resource(s) do not match")
+			return nil, nil, ErrNoPatientMatch
 		}
 
 		matches = append(matches, someMatches...)

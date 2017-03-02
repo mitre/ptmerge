@@ -294,7 +294,7 @@ func (m *MergerTestSuite) TestGodawfulMatch() {
 	m.Nil(outcome)
 	m.Empty(targetURL)
 
-	m.Equal(errors.New("Patient resource(s) do not match"), err)
+	m.Equal(errors.New("Patient resources do not match"), err)
 }
 
 // ========================================================================= //
@@ -323,7 +323,7 @@ func (m *MergerTestSuite) TestResolveConflict() {
 	m.NotNil(outcome)
 	m.NotEmpty(targetURL)
 
-	// Get the diagnostic info from the Patient conflict
+	// Get the diagnostic info from the Patient conflict.
 	found := false
 	var targetPatientID string
 	for _, entry := range outcome.Entry {
@@ -362,4 +362,48 @@ func (m *MergerTestSuite) TestResolveConflict() {
 			break
 		}
 	}
+}
+
+func (m *MergerTestSuite) TestResolveConflictWrongResource() {
+	// The conflict resolution requires a Patient resource. Instead we got an Encounter...
+	created, err := fhirutil.LoadAndPostResource(m.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	m.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(m.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	m.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	m.True(ok)
+
+	merger := NewMerger(m.FHIRServer.URL)
+	source1 := m.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := m.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+
+	outcome, targetURL, err := merger.Merge(source1, source2)
+	m.NoError(err)
+	m.NotNil(outcome)
+	m.NotEmpty(targetURL)
+
+	// Get the diagnostic info from the Patient conflict
+	found := false
+	var targetPatientID string
+	for _, entry := range outcome.Entry {
+		oo, ok := entry.Resource.(*models.OperationOutcome)
+		m.True(ok)
+		m.Len(oo.Issue, 1)
+		if strings.Contains(oo.Issue[0].Diagnostics, "Patient") {
+			found = true
+			parts := strings.SplitN(oo.Issue[0].Diagnostics, ":", 2)
+			targetPatientID = parts[1]
+		}
+	}
+	m.True(found)
+	m.NotEmpty(targetPatientID)
+
+	encounterResource, err := fhirutil.LoadResource("Encounter", "../fixtures/encounters/encounter_1.json")
+	m.NoError(err)
+	err = merger.ResolveConflict(targetURL, targetPatientID, encounterResource)
+	m.Error(err)
+	m.Equal(errors.New("Updated resource of type Encounter does not match target resource of type Patient"), err)
 }
