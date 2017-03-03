@@ -43,7 +43,9 @@ func (s *ServerTestSuite) SetupSuite() {
 	// call to s.DB() stands up the mock Mongo server, see testutil/mongo_suite.go for more.
 	fhirEngine := gin.New()
 	ms := server.NewMasterSession(s.DB().Session, "ptmerge-test")
-	server.RegisterRoutes(fhirEngine, nil, server.NewMongoDataAccessLayer(ms, nil, true), server.Config{})
+	config := server.DefaultConfig
+	config.DatabaseName = "ptmerge-test"
+	server.RegisterRoutes(fhirEngine, nil, server.NewMongoDataAccessLayer(ms, nil, config), config)
 	s.FHIRServer = httptest.NewServer(fhirEngine)
 
 	// Create a mock PTMergeServer.
@@ -366,8 +368,10 @@ func (s *ServerTestSuite) TestMergeFromBatch() {
 	}
 
 	// Make the merge request.
-	source1 := s.FHIRServer.URL + "/Patient/" + leftPatientID + "/$everything"
-	source2 := s.FHIRServer.URL + "/Patient/" + rightPatientID + "/$everything"
+	// source1 := s.FHIRServer.URL + "/Patient/" + leftPatientID + "/$everything"
+	// source2 := s.FHIRServer.URL + "/Patient/" + rightPatientID + "/$everything"
+	source1 := s.FHIRServer.URL + "/Patient?_id=" + leftPatientID + "&_include=*&_revinclude=*"
+	source2 := s.FHIRServer.URL + "/Patient?_id=" + rightPatientID + "&_include=*&_revinclude=*"
 	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
 
 	req, err := http.NewRequest("POST", url, nil)
@@ -459,6 +463,7 @@ func (s *ServerTestSuite) TestResolveConflictConflictResolved() {
 	res, err = http.DefaultClient.Do(req)
 	s.NoError(err)
 	defer res.Body.Close()
+	s.Equal(http.StatusOK, res.StatusCode)
 
 	// Get the target bundle and check that it was updated.
 	target, err := fhirutil.GetResourceByURL("Bundle", s.PTMergeServer.URL+"/merge/"+mergeID+"/target")
@@ -584,6 +589,7 @@ func (s *ServerTestSuite) TestResolveConflictNoMoreConflicts() {
 	res, err = http.DefaultClient.Do(req)
 	s.NoError(err)
 	defer res.Body.Close()
+
 	s.Equal(http.StatusOK, res.StatusCode)
 
 	// Post the encounter resource that resolves the other conflict.
@@ -597,6 +603,7 @@ func (s *ServerTestSuite) TestResolveConflictNoMoreConflicts() {
 	res, err = http.DefaultClient.Do(req)
 	s.NoError(err)
 	defer res.Body.Close()
+
 	s.Equal(http.StatusOK, res.StatusCode)
 
 	// The body of this second response should be the target bundle, since all conflicts are now resolved.

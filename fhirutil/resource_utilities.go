@@ -80,7 +80,7 @@ func GetResource(host, resourceType, resourceID string) (resource interface{}, e
 
 	// Unmarshal the resource returned.
 	resource = models.NewStructForResourceName(resourceType)
-	body, err := ioutil.ReadAll(res.Body)
+	body, err = ioutil.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}

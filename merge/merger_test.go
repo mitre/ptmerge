@@ -33,7 +33,9 @@ func (m *MergerTestSuite) SetupSuite() {
 	// call to s.DB() stands up the mock Mongo server, see testutil/mongo_suite.go for more.
 	fhirEngine := gin.New()
 	ms := server.NewMasterSession(m.DB().Session, "ptmerge-test")
-	server.RegisterRoutes(fhirEngine, nil, server.NewMongoDataAccessLayer(ms, nil, true), server.Config{})
+	config := server.DefaultConfig
+	config.DatabaseName = "ptmerge-test"
+	server.RegisterRoutes(fhirEngine, nil, server.NewMongoDataAccessLayer(ms, nil, config), config)
 	m.FHIRServer = httptest.NewServer(fhirEngine)
 }
 
