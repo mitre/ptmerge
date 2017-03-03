@@ -1,0 +1,129 @@
+{
+    "resourceType": "Bundle",
+    "type": "collection",
+    "entry": [
+        {
+            "resource": {
+                "resourceType": "Patient",
+                "id": "58a4904e97bba945de21ead9",
+                "name": [
+                    {
+                        "given": ["Lowell"],
+                        "family": "Abbott",
+                        "suffix": ["Jr"]
+                    }
+                ],
+                "gender": "male",
+                "birthDate": "1977-01-31",
+                "maritalStatus": {
+                    "coding": [
+                        {
+                            "system": "http://hl7.org/fhir/v3/MaritalStatus",
+                            "code": "M",
+                            "display": "Married"
+                        }
+                    ]
+                },
+                "address": [
+                    {
+                        "use": "home",
+                        "line": ["40 Southbound Hwy"],
+                        "city": "Bedford",
+                        "state": "MA",
+                        "postal": "02144"
+                    }
+                ]
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Condition",
+                "id": "58a4904e07bca945de21eab8",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "254637007",
+                            "display": "Non-small cell lung cancer"
+                        }
+                    ]
+                },
+                "onsetDateTime": "2011-03-21",
+                "subject": {
+                    "reference": "Patient/58a4904e97bba945de21ead9"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Encounter",
+                "id": "58a4904e97bba945ee21eab0",
+                "status": "finished",
+                "period": {
+                    "start": "2011-04-15",
+                    "end": "2011-04-15"
+                },
+                "class": {
+                    "code": "outpatient"
+                },
+                "type": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://snomed.info/sct",
+                                "code": "185349003",
+                                "display": "Encounter for problem"
+                            }
+                        ]
+                    }
+                ],
+                "patient": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "MedicationStatement",
+                "id": "58a4904e97bba945de21fa00",
+                "status": "active",
+                "medicationCodeableConcept": {
+                    "coding": [
+                        {
+                            "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                            "code": "1049565",
+                            "display": "12 HR OxyCONTIN 20 MG Extended Release Oral Tablet"
+                        }
+                    ]
+                },
+                "subject": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                },
+                "effectivePeriod": {
+                    "start": "2012-07-20",
+                    "end": "2012-08-20"
+                }
+            }
+        },
+        {
+            "resource": {
+                "resourceType": "Procedure",
+                "id": "58a4904e98bba945de21fac0",
+                "status": "completed",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "73761001",
+                            "display": "Colonoscopy"
+                        }
+                    ]
+                },
+                "subject": {
+                    "reference": "Patient/58a4904e97bba945de21eac8"
+                },
+                "performedDateTime": "2014-07-01"
+            }
+        }
+    ]
+}

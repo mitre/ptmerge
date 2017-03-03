@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -108,7 +109,7 @@ func (m *MatcherTestSuite) TestMatchBundlesPartialMatch() {
 	leftBundle, ok := fix.(*models.Bundle)
 	m.True(ok)
 
-	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/clint_abbott_bundle.json")
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_jr_bundle.json")
 	m.NoError(err)
 	rightBundle, ok := fix.(*models.Bundle)
 	m.True(ok)
@@ -117,23 +118,11 @@ func (m *MatcherTestSuite) TestMatchBundlesPartialMatch() {
 	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
 	m.NoError(err)
 
-	// Most things will not match, but the MedicationStatements will.
-	m.Len(matches, 2)
-	m.Equal("MedicationStatement", matches[0].ResourceType)
-	m.Equal("MedicationStatement", matches[1].ResourceType)
+	// Most things will not match, but the Patients will.
+	m.Len(matches, 1)
+	m.Equal("Patient", matches[0].ResourceType)
 
-	// Most things will not match. Most striking here is that the Patient didn't match,
-	// so there will be 2 of them.
-	m.Len(unmatchables, 9)
-	pcount := 0
-	for _, resource := range unmatchables {
-		if fhirutil.GetResourceType(resource) == "Patient" {
-			pcount++
-		}
-	}
-	m.Equal(2, pcount)
-
-	// There should also be some encounters.
+	// There should be some unmatched encounters.
 	ecount := 0
 	for _, resource := range unmatchables {
 		if fhirutil.GetResourceType(resource) == "Encounter" {
@@ -143,19 +132,29 @@ func (m *MatcherTestSuite) TestMatchBundlesPartialMatch() {
 	m.Equal(3, ecount)
 
 	// And 2 different procedures.
-	pcount = 0
+	pcount := 0
 	for _, resource := range unmatchables {
 		if fhirutil.GetResourceType(resource) == "Procedure" {
 			pcount++
 		}
 	}
 	m.Equal(2, pcount)
+
+	// And 2 different MedicationStatements.
+	mcount := 0
+	for _, resource := range unmatchables {
+		if fhirutil.GetResourceType(resource) == "MedicationStatement" {
+			mcount++
+		}
+	}
+	m.Equal(3, mcount)
 }
 
 func (m *MatcherTestSuite) TestMatchBundlesNoMatch() {
 	var err error
 
-	// There's absolutely nothing in common, so everything should be unmatchable.
+	// There's absolutely nothing in common, not even the Patient.
+	// In this scenario the match should error out.
 	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
 	m.NoError(err)
 	leftBundle, ok := fix.(*models.Bundle)
@@ -167,23 +166,9 @@ func (m *MatcherTestSuite) TestMatchBundlesNoMatch() {
 	m.True(ok)
 
 	matcher := new(Matcher)
-	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
-	m.NoError(err)
-	m.Len(matches, 0)
-	m.Len(unmatchables, 12)
-
-	// Collectively, all of the left bundle entires and right bundle entries should
-	// be in the unmatchables.
-	for _, entry := range leftBundle.Entry {
-		id := fhirutil.GetResourceID(entry.Resource)
-		found := false
-		for _, um := range unmatchables {
-			if id == fhirutil.GetResourceID(um) {
-				found = true
-			}
-		}
-		m.True(found)
-	}
+	_, _, err = matcher.Match(leftBundle, rightBundle)
+	m.Error(err)
+	m.Equal(errors.New("Patient resources do not match"), err)
 }
 
 // ========================================================================= //

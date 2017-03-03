@@ -55,6 +55,10 @@ func (m *MergeController) Merge(c *gin.Context) {
 	outcome, targetURL, err := merger.Merge(source1, source2)
 
 	if err != nil {
+		if err == merge.ErrNoPatientMatch {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}

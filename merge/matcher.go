@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -22,6 +23,10 @@ var (
 	// MatchThreshold is the total percentage of non-nil paths in a resource that must
 	// match for the whole resource to be considered a match.
 	MatchThreshold = 0.8
+
+	// ErrNoPatientMatch indicates that the patient resources in the bundles didn't exist or didn't match.
+	// A merge cannot continue if there aren't minimally matching patients.
+	ErrNoPatientMatch = errors.New("Patient resources do not match")
 )
 
 // Matcher provides tools for identifying all resources in 2 source bundles that "match".
@@ -51,6 +56,12 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 	leftUnmatchableResourceTypes := setDiff(leftResources.Keys(), rightResources.Keys())  // L not in R
 	rightUnmatchableResourceTypes := setDiff(rightResources.Keys(), leftResources.Keys()) // R not in L
 
+	// If the Patient resource is not in matchableResourceTypes, return an error.
+	// Minimally we need a single, matching Patient object to perform a merge.
+	if !contains(matchableResourceTypes, "Patient") {
+		return nil, nil, errors.New("Patient resource not found in one or both bundles")
+	}
+
 	// Handle all of the unmatchable resource types.
 	for _, key := range leftUnmatchableResourceTypes {
 		unmatchables = append(unmatchables, leftResources[key]...)
@@ -73,6 +84,12 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 		if err != nil {
 			return nil, nil, err
 		}
+
+		if resourceType == "Patient" && len(someMatches) == 0 {
+			// There was no matching Patient resource.
+			return nil, nil, ErrNoPatientMatch
+		}
+
 		matches = append(matches, someMatches...)
 		unmatchables = append(unmatchables, someUnmatchables...)
 	}

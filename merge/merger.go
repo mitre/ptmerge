@@ -134,6 +134,17 @@ func (m *Merger) ResolveConflict(targetBundleURL, targetResourceID string, updat
 		return fmt.Errorf("Target resource %s not found in target bundle %s", targetResourceID, targetBundleURL)
 	}
 
+	// Check that the resources are the same type. If not, we've got a problem!
+	updatedResourceType := fhirutil.GetResourceType(updatedResource)
+	targetResourceType := fhirutil.GetResourceType(targetBundle.Entry[targetResourceIdx].Resource)
+	if updatedResourceType != targetResourceType {
+		if updatedResourceType == "" {
+			// We couldn't figure out what type it was (probably because the request body was garbage), so we'll need a placeholder.
+			updatedResourceType = "Unknown"
+		}
+		return fmt.Errorf("Updated resource of type %s does not match target resource of type %s", updatedResourceType, targetResourceType)
+	}
+
 	// Update the target resource with the one provided.
 	targetBundle.Entry[targetResourceIdx].Resource = updatedResource
 

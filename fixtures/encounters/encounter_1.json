@@ -1,0 +1,23 @@
+{
+    "resourceType": "Encounter",
+    "id": "58a4904e97dba945de21eac9",
+    "status": "finished",
+    "class": {
+        "code": "outpatient"
+    },
+    "period": {
+        "start": "2014-03-15",
+        "end": "2014-03-15"
+    },
+    "type": [
+        {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "185349003",
+                    "display": "Encounter for problem"
+                }
+            ]
+        }
+    ]
+}

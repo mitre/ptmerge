@@ -30,7 +30,9 @@ func (f *FHIRUtilTestSuite) SetupSuite() {
 	// call to s.DB() stands up the mock Mongo server, see testutil/mongo_suite.go for more.
 	fhirEngine := gin.New()
 	ms := server.NewMasterSession(f.DB().Session, "ptmerge-test")
-	server.RegisterRoutes(fhirEngine, nil, server.NewMongoDataAccessLayer(ms, nil, true), server.Config{})
+	config := server.DefaultConfig
+	config.DatabaseName = "ptmerge-test"
+	server.RegisterRoutes(fhirEngine, nil, server.NewMongoDataAccessLayer(ms, nil, config), config)
 	f.FHIRServer = httptest.NewServer(fhirEngine)
 }
 
@@ -206,4 +208,12 @@ func (f *FHIRUtilTestSuite) TestLoadResource() {
 	f.Len(patient.Name[0].Given, 1)
 	f.Equal("Foo", patient.Name[0].Given[0])
 	f.Equal("Bar", patient.Name[0].Family)
+}
+
+func (f *FHIRUtilTestSuite) TestLoadAndPostResource() {
+	created, err := LoadAndPostResource(f.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	f.NoError(err)
+	bundle, ok := created.(*models.Bundle)
+	f.True(ok)
+	f.Len(bundle.Entry, 7)
 }
