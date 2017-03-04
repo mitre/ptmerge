@@ -4,8 +4,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/itsjamie/gin-cors"
 	mgo "gopkg.in/mgo.v2"
 )
 
@@ -27,8 +29,19 @@ func NewServer(fhirhost, dbhost, dbname string, debug bool) *PTMergeServer {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	engine := gin.Default() // includes the default logging and recovery middleware
+	engine.Use(cors.Middleware(cors.Config{
+		Origins:         "*",
+		Methods:         "GET, PUT, POST, DELETE",
+		RequestHeaders:  "Origin, Authorization, Content-Type, If-Match, If-None-Exist",
+		ExposedHeaders:  "Location, ETag, Last-Modified",
+		MaxAge:          86400 * time.Second, // Preflight expires after 1 day
+		Credentials:     true,
+		ValidateHeaders: false,
+	}))
+
 	return &PTMergeServer{
-		Engine:       gin.Default(), // includes the default logging and recovery middleware
+		Engine:       engine,
 		FHIRHost:     fhirhost,
 		DatabaseHost: dbhost,
 		DatabaseName: dbname,
