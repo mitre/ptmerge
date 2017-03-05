@@ -1,5 +1,11 @@
 # ptmerge [![Build Status](https://travis-ci.org/mitre/ptmerge.svg?branch=master)](https://travis-ci.org/mitre/ptmerge)
-A service for merging two FHIR based patient records.
+A service for merging two HL7 FHIR patient records. Can be coupled with the [`ptmerge-frontend`](https://github.com/mitre/ptmerge-frontend).
+
+## Dependencies
+
+1. **MongoDB** - This project requires MongoDB 3.2.\* or higher. To install MongoDB, refer to the
+[MongoDB installation guide](http://docs.mongodb.org/manual/installation/).
+2. **FHIR Server** - ptmerge also requires a running host FHIR server. To install and start a go-based FHIR server, refer to the [GoFHIR Installation Instructions](https://github.com/synthetichealth/gofhir).
 
 ## Environment
 
@@ -45,10 +51,6 @@ go test $(glide novendor)
 
 in this directory.
 
-This project also requires MongoDB 3.2.* or higher. To install MongoDB, refer to the
-[MongoDB installation guide](http://docs.mongodb.org/manual/installation/).
-
-Finally, this project also requires a running host FHIR server. To install and start a go-based FHIR server, refer to the [GoFHIR Installation Instructions](https://github.com/synthetichealth/gofhir).
 
 ## Running the Application
 
@@ -62,7 +64,7 @@ The ptmerge command also has several configuration options, with reasonable defa
 
 ```
 Usage of ./ptmerge:
-  -db string
+  -dbhost string
     	The Mongo database used to host the ptmerge service (default "localhost:27017")
   -dbname string
     	The name of the Mongo database (default "ptmerge")
@@ -70,6 +72,7 @@ Usage of ./ptmerge:
     	Run the ptmerge service in debug mode (more verbose output)
   -fhirhost string
     	The FHIR server used to host the ptmerge service (default "http://localhost:3001")
+
 ```
 
 ## License
