@@ -32,7 +32,7 @@ func GetResourceType(resource interface{}) string {
 }
 
 // JSONGetResourceType gets the string equivalent of a FHIR resource type
-// from the map[string]interface{} equivalent of FHIR JSON for that resource.
+// from the JSON byte string of that resource.
 func JSONGetResourceType(obj []byte) string {
 	var resource map[string]interface{}
 	err := json.Unmarshal(obj, &resource)
