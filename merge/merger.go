@@ -157,3 +157,93 @@ func (m *Merger) ResolveConflict(targetBundleURL, targetResourceID string, updat
 	// No error means the conflict was resolved and the bundle was updated successfully.
 	return nil
 }
+
+// UpdateTargetResource updates a single resource in the target bundle, by ID.
+func (m *Merger) UpdateTargetResource(targetBundleURL, targetResourceID string, updatedResource interface{}) error {
+
+	// Get the merge target.
+	target, err := fhirutil.GetResourceByURL("Bundle", targetBundleURL)
+	if err != nil {
+		return err
+	}
+	targetBundle := target.(*models.Bundle)
+
+	// Find the resource to update.
+	targetResourceIdx := -1
+	for i, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceID(entry.Resource) == targetResourceID {
+			targetResourceIdx = i
+			break
+		}
+	}
+
+	if targetResourceIdx == -1 {
+		// The target resource was not found.
+		return fmt.Errorf("Target resource %s not found in target bundle %s", targetResourceID, targetBundleURL)
+	}
+
+	// Check that the resources are the same type. If not, we've got a problem!
+	updatedResourceType := fhirutil.GetResourceType(updatedResource)
+	targetResourceType := fhirutil.GetResourceType(targetBundle.Entry[targetResourceIdx].Resource)
+	if updatedResourceType != targetResourceType {
+		if updatedResourceType == "" {
+			// We couldn't figure out what type it was (probably because the request body was garbage), so we'll need a placeholder.
+			updatedResourceType = "Unknown"
+		}
+		return fmt.Errorf("Updated resource of type %s does not match target resource of type %s", updatedResourceType, targetResourceType)
+	}
+
+	// Update the target resource with the one provided.
+	targetBundle.Entry[targetResourceIdx].Resource = updatedResource
+
+	// PUT the updated bundle.
+	_, err = fhirutil.UpdateResource(m.fhirHost, "Bundle", targetBundle)
+	if err != nil {
+		return err
+	}
+
+	// No error means the resource was updated successfully.
+	return nil
+}
+
+// DeleteTargetResource deletes a single resource in the target bundle, by ID.
+func (m *Merger) DeleteTargetResource(targetBundleURL, targetResourceID string) error {
+
+	// Get the merge target.
+	target, err := fhirutil.GetResourceByURL("Bundle", targetBundleURL)
+	if err != nil {
+		return err
+	}
+	targetBundle := target.(*models.Bundle)
+
+	// Find the resource to update.
+	found := false
+	idx := 0
+	keepEntries := make([]models.BundleEntryComponent, len(targetBundle.Entry)-1)
+
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceID(entry.Resource) == targetResourceID {
+			found = true
+			continue
+		}
+		keepEntries[idx] = entry
+		idx++
+	}
+
+	if !found {
+		// The target resource was not found.
+		return fmt.Errorf("Target resource %s not found in target bundle %s", targetResourceID, targetBundleURL)
+	}
+
+	// Update the target resource with one less entry.
+	targetBundle.Entry = keepEntries
+
+	// PUT the updated bundle.
+	_, err = fhirutil.UpdateResource(m.fhirHost, "Bundle", targetBundle)
+	if err != nil {
+		return err
+	}
+
+	// No error means the resource was updated successfully.
+	return nil
+}

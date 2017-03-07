@@ -10,15 +10,22 @@ func RegisterRoutes(router *gin.Engine, session *mgo.Session, dbname string, fhi
 
 	mc := NewMergeController(session, dbname, fhirHost)
 
-	// Merging and confict resolution.
+	// Merge operations.
 	router.POST("/merge", mc.Merge)
 	router.POST("/merge/:merge_id/resolve/:conflict_id", mc.Resolve)
 	router.POST("/merge/:merge_id/abort", mc.DeleteMerge)
 
-	// Convenience routes.
-	router.GET("/merge", mc.AllMerges)
-	router.GET("/merge/:merge_id", mc.GetMerge)
+	// Merge target management.
+	router.GET("/merge/:merge_id/target", mc.GetTarget)
+	router.POST("/merge/:merge_id/target/resources/:resource_id", mc.UpdateTargetResource)
+	router.DELETE("/merge/:merge_id/target/resources/:resource_id", mc.DeleteTargetResource)
+
+	// Merge conflict management.
 	router.GET("/merge/:merge_id/conflicts", mc.GetRemainingConflicts)
 	router.GET("/merge/:merge_id/resolved", mc.GetResolvedConflicts)
-	router.GET("/merge/:merge_id/target", mc.GetTarget)
+	router.DELETE("/merge/:merge_id/conflicts/:conflict_id", mc.DeleteConflict)
+
+	// Merge metadata.
+	router.GET("/merge", mc.AllMerges)
+	router.GET("/merge/:merge_id", mc.GetMerge)
 }
