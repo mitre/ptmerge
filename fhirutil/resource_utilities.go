@@ -31,6 +31,22 @@ func GetResourceType(resource interface{}) string {
 	return ""
 }
 
+// JSONGetResourceType gets the string equivalent of a FHIR resource type
+// from the map[string]interface{} equivalent of FHIR JSON for that resource.
+func JSONGetResourceType(obj []byte) string {
+	var resource map[string]interface{}
+	err := json.Unmarshal(obj, &resource)
+	if err != nil {
+		return ""
+	}
+
+	s, ok := resource["resourceType"].(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
 // GetResourceByURL GETs a FHIR resource from it's specified URL.
 func GetResourceByURL(resourceType, resourceURL string) (resource interface{}, err error) {
 	// Make the request.
@@ -70,11 +86,11 @@ func GetResource(host, resourceType, resourceID string) (resource interface{}, e
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode == 404 {
+	if res.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("Resource %s:%s not found", resourceType, resourceID)
 	}
 
-	if res.StatusCode != 200 {
+	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("An unexpected error occured while requesting resource %s:%s", resourceType, resourceID)
 	}
 

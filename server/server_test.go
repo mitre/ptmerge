@@ -1553,6 +1553,124 @@ func (s *ServerTestSuite) TestGetResolvedConflictsMergeNotFound() {
 }
 
 // ========================================================================= //
+// TEST DELETE UNRESOLVED CONFLICT                                           //
+// ========================================================================= //
+
+func (s *ServerTestSuite) TestDeleteUnresolvedConflict() {
+	var err error
+
+	// Setup a merge with unresolved conflicts.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusCreated, res.StatusCode)
+
+	// Get a list of conflict IDs.
+	decoder := json.NewDecoder(res.Body)
+	ooBundle := &models.Bundle{}
+	err = decoder.Decode(ooBundle)
+	s.NoError(err)
+
+	conflictIDs := make([]string, len(ooBundle.Entry))
+	for i, entry := range ooBundle.Entry {
+		oo := entry.Resource.(*models.OperationOutcome)
+		conflictIDs[i] = oo.Id
+	}
+	s.True(len(conflictIDs) > 0)
+	conflictID := conflictIDs[0]
+
+	// Get the merge ID.
+	mergeID := res.Header.Get("Location")
+	s.NotEmpty(mergeID)
+
+	// Delete one of the conflicts.
+	req, err = http.NewRequest("DELETE", s.PTMergeServer.URL+"/merge/"+mergeID+"/conflicts/"+conflictID, nil)
+	s.NoError(err)
+	res, err = http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	s.Equal(http.StatusNoContent, res.StatusCode)
+	fmt.Println(string(body))
+
+	// The OperationOutcome should not exist.
+	_, err = fhirutil.GetResource(s.FHIRServer.URL, "OperationOutcome", conflictID)
+	s.Equal(fmt.Sprintf("Resource OperationOutcome:%s not found", conflictID), err.Error())
+
+	// And the merge state should also reflect that.
+	mergeState := state.MergeState{}
+	err = s.DB().C("merges").FindId(mergeID).One(&mergeState)
+	s.NoError(err)
+	s.True(!contains(mergeState.Conflicts.Keys(), conflictID))
+}
+
+func (s *ServerTestSuite) TestDeleteUnresolvedConflictConflictNotFound() {
+	var err error
+
+	// Put the merge state in mongo.
+	c1 := make(state.ConflictMap)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
+	s.NoError(err)
+
+	// Make the request.
+	conflictID := bson.NewObjectId().Hex()
+	req, err := http.NewRequest("DELETE", s.PTMergeServer.URL+"/merge/"+m1.MergeID+"/conflicts/"+conflictID, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+
+	// Check the response.
+	s.Equal(http.StatusNotFound, res.StatusCode)
+	s.Equal(fmt.Sprintf("Merge conflict %s not found for merge %s", conflictID, m1.MergeID), string(body))
+}
+
+func (s *ServerTestSuite) TestDeleteUnresolvedConflictMergeNotFound() {
+	// Make the request.
+	mergeID := bson.NewObjectId().Hex()
+	req, err := http.NewRequest("DELETE", s.PTMergeServer.URL+"/merge/"+mergeID+"/conflicts/"+bson.NewObjectId().Hex(), nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+
+	// Check the response.
+	s.Equal(http.StatusNotFound, res.StatusCode)
+	s.Equal(fmt.Sprintf("Merge %s not found", mergeID), string(body))
+}
+
+// ========================================================================= //
 // TEST GET MERGE TARGET                                                     //
 // ========================================================================= //
 
@@ -1622,6 +1740,262 @@ func (s *ServerTestSuite) TestGetMergeTargetMergeNotFound() {
 	req := s.PTMergeServer.URL + "/merge/" + mergeID + "/target"
 
 	res, err := http.Get(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+
+	// Check the response.
+	s.Equal(http.StatusNotFound, res.StatusCode)
+	s.Equal(fmt.Sprintf("Merge %s not found", mergeID), string(body))
+}
+
+// ========================================================================= //
+// TEST UPDATE TARGET RESOURCE                                               //
+// ========================================================================= //
+
+func (s *ServerTestSuite) TestUpdateTargetResource() {
+	var err error
+
+	// Setup a merge with unresolved conflicts.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusCreated, res.StatusCode)
+
+	// Get a list of conflict resource IDs.
+	decoder := json.NewDecoder(res.Body)
+	ooBundle := &models.Bundle{}
+	err = decoder.Decode(ooBundle)
+	s.NoError(err)
+
+	conflictResourceIDs := make([]string, len(ooBundle.Entry))
+	for i, entry := range ooBundle.Entry {
+		oo := entry.Resource.(*models.OperationOutcome)
+		parts := strings.SplitN(oo.Issue[0].Diagnostics, ":", 2)
+		conflictResourceIDs[i] = parts[1]
+	}
+
+	// Get the merge ID.
+	mergeID := res.Header.Get("Location")
+	s.NotEmpty(mergeID)
+
+	// Get the target bundle.
+	target, err := fhirutil.GetResourceByURL("Bundle", s.PTMergeServer.URL+"/merge/"+mergeID+"/target")
+	s.NoError(err)
+	targetBundle, ok := target.(*models.Bundle)
+	s.True(ok)
+
+	// Pick the first MedicationStatement resource to replace.
+	var targetResourceID string
+	for _, entry := range targetBundle.Entry {
+		targetResourceType := fhirutil.GetResourceType(entry.Resource)
+		targetResourceID = fhirutil.GetResourceID(entry.Resource)
+		if targetResourceType == "MedicationStatement" {
+			break
+		}
+	}
+	s.NotEmpty(targetResourceID)
+	s.False(contains(conflictResourceIDs, targetResourceID))
+
+	// Post the MedicationStatement resource that updates it.
+	medResource, err := fhirutil.LoadResource("MedicationStatement", "../fixtures/medication_statements/medication_statement_1.json")
+	data, err := json.Marshal(medResource)
+	s.NoError(err)
+	s.NotEmpty(data)
+
+	req, err = http.NewRequest("POST", s.PTMergeServer.URL+"/merge/"+mergeID+"/target/resources/"+targetResourceID, bytes.NewReader(data))
+	s.NoError(err)
+	res, err = http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+	s.Equal(http.StatusOK, res.StatusCode)
+
+	for _, entry := range targetBundle.Entry {
+		if fhirutil.GetResourceID(entry.Resource) == targetResourceID {
+			postedMed, ok := medResource.(*models.MedicationStatement)
+			s.True(ok)
+			targetMed, ok := entry.Resource.(*models.MedicationStatement)
+			s.True(ok)
+			s.Equal(postedMed.Status, targetMed.Status)
+			s.Equal(postedMed.MedicationCodeableConcept.Coding[0].Code, targetMed.MedicationCodeableConcept.Coding[0].Code)
+			break
+		}
+	}
+}
+
+func (s *ServerTestSuite) TestUpdateTargetResourceTargetNotFound() {
+	var err error
+
+	// Put the merge state in mongo.
+	c1 := make(state.ConflictMap)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
+	s.NoError(err)
+
+	// Make the request.
+	targeResourceID := bson.NewObjectId().Hex()
+	res, err := http.Post(s.PTMergeServer.URL+"/merge/"+m1.MergeID+"/target/resources/"+targeResourceID, "application/json", bytes.NewReader([]byte("{\"resourceType\":\"MedicationStatement\"}")))
+	s.NoError(err)
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+
+	// Check the response.
+	s.Equal(http.StatusInternalServerError, res.StatusCode)
+	s.Equal(fmt.Sprintf("Resource %s not found", m1.TargetURL), string(body))
+}
+
+func (s *ServerTestSuite) TestUpdateTargetResourceMergeNotFound() {
+	// Make the request.
+	mergeID := bson.NewObjectId().Hex()
+	res, err := http.Post(s.PTMergeServer.URL+"/merge/"+mergeID+"/target/resources/"+bson.NewObjectId().Hex(), "application/json", nil)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+
+	// Check the response.
+	s.Equal(http.StatusNotFound, res.StatusCode)
+	s.Equal(fmt.Sprintf("Merge %s not found", mergeID), string(body))
+}
+
+// ========================================================================= //
+// TEST DELETE TARGET RESOURCE                                               //
+// ========================================================================= //
+
+func (s *ServerTestSuite) TestDeleteTargetResource() {
+	var err error
+
+	// Setup a merge with unresolved conflicts.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_unmarried_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusCreated, res.StatusCode)
+
+	// Get a list of conflict resource IDs.
+	decoder := json.NewDecoder(res.Body)
+	ooBundle := &models.Bundle{}
+	err = decoder.Decode(ooBundle)
+	s.NoError(err)
+
+	conflictResourceIDs := make([]string, len(ooBundle.Entry))
+	for i, entry := range ooBundle.Entry {
+		oo := entry.Resource.(*models.OperationOutcome)
+		parts := strings.SplitN(oo.Issue[0].Diagnostics, ":", 2)
+		conflictResourceIDs[i] = parts[1]
+	}
+
+	// Get the merge ID.
+	mergeID := res.Header.Get("Location")
+	s.NotEmpty(mergeID)
+
+	// Get the target bundle.
+	target, err := fhirutil.GetResourceByURL("Bundle", s.PTMergeServer.URL+"/merge/"+mergeID+"/target")
+	s.NoError(err)
+	targetBundle, ok := target.(*models.Bundle)
+	s.True(ok)
+
+	// Pick the first MedicationStatement resource to delete.
+	var targetResourceID string
+	for _, entry := range targetBundle.Entry {
+		targetResourceType := fhirutil.GetResourceType(entry.Resource)
+		targetResourceID = fhirutil.GetResourceID(entry.Resource)
+		if targetResourceType == "MedicationStatement" {
+			break
+		}
+	}
+	s.NotEmpty(targetResourceID)
+	s.False(contains(conflictResourceIDs, targetResourceID))
+
+	// DELETE it.
+	req, err = http.NewRequest("DELETE", s.PTMergeServer.URL+"/merge/"+mergeID+"/target/resources/"+targetResourceID, nil)
+	s.NoError(err)
+	res, err = http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+	s.Equal(http.StatusNoContent, res.StatusCode)
+}
+
+func (s *ServerTestSuite) TestDeleteTargetResourceTargetNotFound() {
+	var err error
+
+	// Put the merge state in mongo.
+	c1 := make(state.ConflictMap)
+	m1 := &state.MergeState{
+		MergeID:   bson.NewObjectId().Hex(),
+		Completed: false,
+		TargetURL: s.FHIRServer.URL + "/Bundle/" + bson.NewObjectId().Hex(),
+		Conflicts: c1,
+	}
+	_, err = s.insertMergeState(m1)
+	s.NoError(err)
+
+	// Make the request.
+	req, err := http.NewRequest("DELETE", s.PTMergeServer.URL+"/merge/"+m1.MergeID+"/target/resources/"+bson.NewObjectId().Hex(), nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+
+	// Check the response.
+	s.Equal(http.StatusInternalServerError, res.StatusCode)
+	s.Equal(fmt.Sprintf("Resource %s not found", m1.TargetURL), string(body))
+}
+
+func (s *ServerTestSuite) TestDeleteTargetResourceMergeNotFound() {
+	// Make the request.
+	mergeID := bson.NewObjectId().Hex()
+	req, err := http.NewRequest("DELETE", s.PTMergeServer.URL+"/merge/"+mergeID+"/target/resources/"+bson.NewObjectId().Hex(), nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
 	s.NoError(err)
 	defer res.Body.Close()
 

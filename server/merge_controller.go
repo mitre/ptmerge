@@ -276,34 +276,11 @@ func (m *MergeController) DeleteMerge(c *gin.Context) {
 }
 
 // ========================================================================= //
-// MERGE METADATA                                                            //
+// MERGE TARGET MANAGEMENT                                                   //
 // ========================================================================= //
 
-// AllMerges returns the metadata for all merges we have a record of.
-func (m *MergeController) AllMerges(c *gin.Context) {
-	var err error
-	worker := m.session.Copy()
-	defer worker.Close()
-
-	// Get all merges from mongo.
-	var merges []state.MergeState
-	err = worker.DB(m.dbname).C("merges").Find(nil).All(&merges)
-	if err != nil {
-		c.String(http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Package up the merges metadata.
-	meta := &state.Merges{
-		Timestamp: time.Now(),
-		Merges:    merges,
-	}
-
-	c.JSON(http.StatusOK, meta)
-}
-
-// GetMerge returns the metadata for a single merge.
-func (m *MergeController) GetMerge(c *gin.Context) {
+// GetTarget returns the (partially complete) merge target given a mergeID.
+func (m *MergeController) GetTarget(c *gin.Context) {
 	var err error
 	worker := m.session.Copy()
 	defer worker.Close()
@@ -322,14 +299,112 @@ func (m *MergeController) GetMerge(c *gin.Context) {
 		return
 	}
 
-	// Package up the merge metadata.
-	meta := &state.Merge{
-		Timestamp: time.Now(),
-		Merge:     mergeState,
+	// Get the target from the host FHIR server.
+	targetBundle, err := fhirutil.GetResourceByURL("Bundle", mergeState.TargetURL)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, targetBundle)
+}
+
+// UpdateTargetResource allows manual update of a resource in the target bundle.
+// The updated resource should be in the POST body.
+func (m *MergeController) UpdateTargetResource(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	mergeID := c.Param("merge_id")
+	targetResourceID := c.Param("resource_id")
+
+	// Get the merge state from mongo.
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
 	}
 
-	c.JSON(http.StatusOK, meta)
+	// Get the resource from the request body.
+	body, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Unmarshal into a map[string]interface{} to get the resourceType.
+
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	resourceType := fhirutil.JSONGetResourceType(body)
+	if resourceType == "" {
+		c.String(http.StatusInternalServerError, "Could not identify resourceType of updated resource")
+		return
+	}
+
+	// Now we can unmarshal the body into the proper resource struct.
+	updatedResource := models.NewStructForResourceName(resourceType)
+	err = json.Unmarshal(body, &updatedResource)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Update the target resource.
+	merger := merge.NewMerger(m.fhirHost)
+	err = merger.UpdateTargetResource(mergeState.TargetURL, targetResourceID, updatedResource)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Respond with the updated resource.
+	c.JSON(http.StatusOK, updatedResource)
 }
+
+// DeleteTargetResource allows manual update of a resource in the target bundle.
+// The updated resource should be in the POST body.
+func (m *MergeController) DeleteTargetResource(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	mergeID := c.Param("merge_id")
+	targetResourceID := c.Param("resource_id")
+
+	// Get the merge state from mongo.
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	merger := merge.NewMerger(m.fhirHost)
+	err = merger.DeleteTargetResource(mergeState.TargetURL, targetResourceID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Respond with 204 no content.
+	c.Data(http.StatusNoContent, "", nil)
+}
+
+// ========================================================================= //
+// CONFLICT MANAGEMENT                                                       //
+// ========================================================================= //
 
 // GetRemainingConflicts returns all unresolved merge conflicts for a given mergeID.
 func (m *MergeController) GetRemainingConflicts(c *gin.Context) {
@@ -401,8 +476,104 @@ func (m *MergeController) GetResolvedConflicts(c *gin.Context) {
 	c.JSON(http.StatusOK, fhirutil.ResponseBundle("200", resolved))
 }
 
-// GetTarget returns the (partially complete) merge target given a mergeID.
-func (m *MergeController) GetTarget(c *gin.Context) {
+// DeleteConflict removes a conflict from the merge, including its target resource.
+func (m *MergeController) DeleteConflict(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	mergeID := c.Param("merge_id")
+	conflictID := c.Param("conflict_id")
+
+	// Get the merge state from mongo.
+	var mergeState state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(bson.M{"_id": mergeID}).One(&mergeState)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			c.String(http.StatusNotFound, "Merge %s not found", mergeID)
+			return
+		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Check that the merge is incomplete.
+	if mergeState.Completed {
+		c.String(http.StatusBadRequest, "Merge %s is complete, no remaining conflicts to resolve", mergeID)
+		return
+	}
+
+	// Check that the conflictID exists and is part of this merge.
+	conflict, found := mergeState.Conflicts[conflictID]
+	if !found {
+		c.String(http.StatusNotFound, "Merge conflict %s not found for merge %s", conflictID, mergeID)
+		return
+	}
+
+	// Check that the conflict wasn't already resolved.
+	if conflict.Resolved {
+		c.String(http.StatusBadRequest, "Merge conflict %s was already resolved for merge %s", conflictID, mergeID)
+		return
+	}
+
+	// Delete this conflict from the target.
+	merger := merge.NewMerger(m.fhirHost)
+	err = merger.DeleteTargetResource(mergeState.TargetURL, conflict.TargetResource.ResourceID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// No error mean success, delete the conflict OperationOutcome.
+	err = fhirutil.DeleteResourceByURL(conflict.OperationOutcomeURL)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Remove the conflict from the merge state.
+	delete(mergeState.Conflicts, conflictID)
+
+	// Save the updated state.
+	err = worker.DB(m.dbname).C("merges").UpdateId(mergeID, bson.M{"$set": mergeState})
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Respond with 204 no content.
+	c.Data(http.StatusNoContent, "", nil)
+}
+
+// ========================================================================= //
+// MERGE METADATA                                                            //
+// ========================================================================= //
+
+// AllMerges returns the metadata for all merges we have a record of.
+func (m *MergeController) AllMerges(c *gin.Context) {
+	var err error
+	worker := m.session.Copy()
+	defer worker.Close()
+
+	// Get all merges from mongo.
+	var merges []state.MergeState
+	err = worker.DB(m.dbname).C("merges").Find(nil).All(&merges)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Package up the merges metadata.
+	meta := &state.Merges{
+		Timestamp: time.Now(),
+		Merges:    merges,
+	}
+
+	c.JSON(http.StatusOK, meta)
+}
+
+// GetMerge returns the metadata for a single merge.
+func (m *MergeController) GetMerge(c *gin.Context) {
 	var err error
 	worker := m.session.Copy()
 	defer worker.Close()
@@ -421,11 +592,11 @@ func (m *MergeController) GetTarget(c *gin.Context) {
 		return
 	}
 
-	// Get the target from the host FHIR server.
-	targetBundle, err := fhirutil.GetResourceByURL("Bundle", mergeState.TargetURL)
-	if err != nil {
-		c.String(http.StatusInternalServerError, err.Error())
-		return
+	// Package up the merge metadata.
+	meta := &state.Merge{
+		Timestamp: time.Now(),
+		Merge:     mergeState,
 	}
-	c.JSON(http.StatusOK, targetBundle)
+
+	c.JSON(http.StatusOK, meta)
 }
