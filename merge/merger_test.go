@@ -274,9 +274,8 @@ func (m *MergerTestSuite) TestMergePoorMatch() {
 }
 
 func (m *MergerTestSuite) TestGodawfulMatch() {
-	// A match so bad, the Patient resource doesn't even match. In this case
-	// we return an error since the target would end up with 2 Patient
-	// resource in it.
+	// A match so bad, this merge really shouldn't be happening. Just the
+	// patient resource will match, to make the merge possible.
 	created, err := fhirutil.LoadAndPostResource(m.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
 	m.NoError(err)
 	leftBundle, ok := created.(*models.Bundle)
@@ -292,11 +291,21 @@ func (m *MergerTestSuite) TestGodawfulMatch() {
 	source2 := m.FHIRServer.URL + "/Bundle/" + rightBundle.Id
 
 	outcome, targetURL, err := merger.Merge(source1, source2)
-	m.Error(err)
-	m.Nil(outcome)
-	m.Empty(targetURL)
+	m.NoError(err)
+	m.NotNil(outcome)
+	m.NotEmpty(targetURL)
 
-	m.Equal(errors.New("Patient resources do not match"), err)
+	// Just one conflict, for the patient resource. Everything else was "unmatchable".
+	m.Len(outcome.Entry, 1)
+
+	oo, ok := outcome.Entry[0].Resource.(*models.OperationOutcome)
+	m.True(ok)
+	m.Len(oo.Issue, 1)
+	issue := oo.Issue[0]
+	// Should be referencing a Patient resource.
+	m.True(strings.Contains(issue.Diagnostics, "Patient"))
+	// Many paths with conflicts.
+	m.Len(issue.Location, 9)
 }
 
 // ========================================================================= //

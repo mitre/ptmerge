@@ -17,6 +17,7 @@ import (
 	"github.com/intervention-engine/fhir/models"
 	"github.com/intervention-engine/fhir/server"
 	"github.com/mitre/ptmerge/fhirutil"
+	"github.com/mitre/ptmerge/merge"
 	"github.com/mitre/ptmerge/state"
 	"github.com/mitre/ptmerge/testutil"
 	"github.com/stretchr/testify/suite"
@@ -289,46 +290,6 @@ func (s *ServerTestSuite) TestMergeSomeConflicts() {
 	s.Equal(encounterTargetID, ec.TargetResource.ResourceID)
 }
 
-func (s *ServerTestSuite) TestMergePatientsDontMatch() {
-	// If the patient resources don't match the merge is rejected.
-	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
-	s.NoError(err)
-	leftBundle, ok := created.(*models.Bundle)
-	s.True(ok)
-
-	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/joey_chestnut_bundle.json")
-	s.NoError(err)
-	rightBundle, ok := created2.(*models.Bundle)
-	s.True(ok)
-
-	// Get a count of the number of merge states in Mongo.
-	mergeCount, err := s.DB().C("merges").Count()
-	s.NoError(err)
-
-	// Make the merge request.
-	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
-	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
-	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
-
-	req, err := http.NewRequest("POST", url, nil)
-	s.NoError(err)
-	res, err := http.DefaultClient.Do(req)
-	s.NoError(err)
-	defer res.Body.Close()
-
-	s.Equal(http.StatusBadRequest, res.StatusCode)
-
-	// Unmarshal and check the body.
-	body, err := ioutil.ReadAll(res.Body)
-	s.NoError(err)
-	s.Equal("Patient resources do not match", string(body))
-
-	// Make sure mongo wasn't updated.
-	newMergeCount, err := s.DB().C("merges").Count()
-	s.NoError(err)
-	s.Equal(mergeCount, newMergeCount)
-}
-
 func (s *ServerTestSuite) TestMergeFromBatch() {
 	// The bundles here come from queries of the from /Patient/:patient_id/$everything.
 	// In practice, these are bundles formed by the server as a union of _include and _revinclude.
@@ -368,8 +329,6 @@ func (s *ServerTestSuite) TestMergeFromBatch() {
 	}
 
 	// Make the merge request.
-	// source1 := s.FHIRServer.URL + "/Patient/" + leftPatientID + "/$everything"
-	// source2 := s.FHIRServer.URL + "/Patient/" + rightPatientID + "/$everything"
 	source1 := s.FHIRServer.URL + "/Patient?_id=" + leftPatientID + "&_include=*&_revinclude=*"
 	source2 := s.FHIRServer.URL + "/Patient?_id=" + rightPatientID + "&_include=*&_revinclude=*"
 	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
@@ -386,6 +345,37 @@ func (s *ServerTestSuite) TestMergeFromBatch() {
 	newMergeCount, err := s.DB().C("merges").Count()
 	s.NoError(err)
 	s.Equal(mergeCount+1, newMergeCount)
+}
+
+func (s *ServerTestSuite) TestMergeBadSources() {
+	// One of the source bundles is missing a Patient resource, so no merge can be performed.
+	created, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	s.NoError(err)
+	leftBundle, ok := created.(*models.Bundle)
+	s.True(ok)
+
+	created2, err := fhirutil.LoadAndPostResource(s.FHIRServer.URL, "Bundle", "../fixtures/bundles/no_patient_bundle.json")
+	s.NoError(err)
+	rightBundle, ok := created2.(*models.Bundle)
+	s.True(ok)
+
+	// Make the merge request.
+	source1 := s.FHIRServer.URL + "/Bundle/" + leftBundle.Id
+	source2 := s.FHIRServer.URL + "/Bundle/" + rightBundle.Id
+	url := s.PTMergeServer.URL + "/merge?source1=" + url.QueryEscape(source1) + "&source2=" + url.QueryEscape(source2)
+
+	req, err := http.NewRequest("POST", url, nil)
+	s.NoError(err)
+	res, err := http.DefaultClient.Do(req)
+	s.NoError(err)
+	defer res.Body.Close()
+
+	s.Equal(http.StatusBadRequest, res.StatusCode)
+
+	// Unmarshal and check the body.
+	body, err := ioutil.ReadAll(res.Body)
+	s.NoError(err)
+	s.Equal(merge.ErrNoPatientResource.Error(), string(body))
 }
 
 // ========================================================================= //
