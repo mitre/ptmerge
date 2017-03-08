@@ -100,7 +100,7 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 		}
 
 		// For all other resource types, perform matching without replacement.
-		// This  always comparing the next available left to the remaining rights.
+		// This always compares the next available left to the remaining rights.
 		someMatches, someUnmatchables, err := m.matchWithoutReplacement(lefts, rights)
 		if err != nil {
 			return nil, nil, err
