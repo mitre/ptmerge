@@ -17,10 +17,14 @@ type Merge struct {
 // MergeState represents the current state of a merge as it is stored in mongo.
 // This is stored in the "merges" collection.
 type MergeState struct {
-	MergeID   string      `bson:"_id,omitempty" json:"id,omitempty"`
-	TargetURL string      `bson:"targetBundle,omitempty" json:"targetBundle,omitempty"`
-	Conflicts ConflictMap `bson:"conflicts,omitempty" json:"conflicts,omitempty"`
-	Completed bool        `bson:"completed" json:"completed"`
+	MergeID    string      `bson:"_id,omitempty" json:"id,omitempty"`
+	Source1URL string      `bson:"source1,omitempty" json:"source1,omitempty"`
+	Source2URL string      `bson:"source2,omitempty" json:"source2,omitempty"`
+	TargetURL  string      `bson:"targetBundle,omitempty" json:"targetBundle,omitempty"`
+	Conflicts  ConflictMap `bson:"conflicts,omitempty" json:"conflicts,omitempty"`
+	Completed  bool        `bson:"completed" json:"completed"`
+	Start      *time.Time  `bson:"start,omitempty" json:"start,omitempty"`
+	End        *time.Time  `bson:"end,omitempty" json:"end,omitempty"`
 }
 
 // ConflictMap is a map containing one or more ConflictStates. The key to each

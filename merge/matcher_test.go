@@ -1,7 +1,6 @@
 package merge
 
 import (
-	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -153,8 +152,8 @@ func (m *MatcherTestSuite) TestMatchBundlesPartialMatch() {
 func (m *MatcherTestSuite) TestMatchBundlesNoMatch() {
 	var err error
 
-	// There's absolutely nothing in common, not even the Patient.
-	// In this scenario the match should error out.
+	// There's absolutely nothing in common, not even the Patient. However, to make the
+	// merge possible the patient resources will still match.
 	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
 	m.NoError(err)
 	leftBundle, ok := fix.(*models.Bundle)
@@ -166,9 +165,56 @@ func (m *MatcherTestSuite) TestMatchBundlesNoMatch() {
 	m.True(ok)
 
 	matcher := new(Matcher)
-	_, _, err = matcher.Match(leftBundle, rightBundle)
+	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
+	m.NoError(err)
+	m.Len(matches, 1)
+	m.Len(unmatchables, 10)
+
+	// Validate the one match (Patient).
+	match := matches[0]
+	m.Equal("Patient", match.ResourceType)
+}
+
+func (m *MatcherTestSuite) TestErrNoPatientResource() {
+	// If one or both of the source bundles is missing a Patient resource, we error out.
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	leftBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/no_patient_bundle.json")
+	m.NoError(err)
+	rightBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	matcher := new(Matcher)
+	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
 	m.Error(err)
-	m.Equal(errors.New("Patient resources do not match"), err)
+	m.Len(matches, 0)
+	m.Len(unmatchables, 0)
+
+	m.Equal(ErrNoPatientResource, err)
+}
+
+func (m *MatcherTestSuite) TestErrDuplicatePatientResource() {
+	// If one or both bundles has more than one Patient resource, we error out.
+	fix, err := fhirutil.LoadResource("Bundle", "../fixtures/bundles/lowell_abbott_bundle.json")
+	m.NoError(err)
+	leftBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	fix, err = fhirutil.LoadResource("Bundle", "../fixtures/bundles/dup_patient_bundle.json")
+	m.NoError(err)
+	rightBundle, ok := fix.(*models.Bundle)
+	m.True(ok)
+
+	matcher := new(Matcher)
+	matches, unmatchables, err := matcher.Match(leftBundle, rightBundle)
+	m.Error(err)
+	m.Len(matches, 0)
+	m.Len(unmatchables, 0)
+
+	m.Equal(ErrDuplicatePatientResource, err)
 }
 
 // ========================================================================= //

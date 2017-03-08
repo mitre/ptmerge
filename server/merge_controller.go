@@ -55,7 +55,7 @@ func (m *MergeController) Merge(c *gin.Context) {
 	outcome, targetURL, err := merger.Merge(source1, source2)
 
 	if err != nil {
-		if err == merge.ErrNoPatientMatch {
+		if err == merge.ErrNoPatientResource || err == merge.ErrDuplicatePatientResource {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -100,11 +100,15 @@ func (m *MergeController) Merge(c *gin.Context) {
 
 	// Some conflicts exist, create a new record in mongo to manage this merge's state.
 	mergeID := bson.NewObjectId().Hex()
+	now := time.Now()
 	err = worker.DB(m.dbname).C("merges").Insert(&state.MergeState{
-		MergeID:   mergeID,
-		Completed: false,
-		TargetURL: targetURL,
-		Conflicts: conflictMap,
+		MergeID:    mergeID,
+		Completed:  false,
+		Source1URL: source1,
+		Source2URL: source2,
+		TargetURL:  targetURL,
+		Conflicts:  conflictMap,
+		Start:      &now,
 	})
 
 	if err != nil {
@@ -197,7 +201,10 @@ func (m *MergeController) Resolve(c *gin.Context) {
 	numRemaining := len(mergeState.Conflicts.RemainingConflicts())
 	if numRemaining == 0 {
 		// No conflicts remaining, mark the merge as "completed" and return the target Bundle.
-		err = worker.DB(m.dbname).C("merges").UpdateId(mergeID, bson.M{"$set": bson.M{"completed": true}})
+		mergeState.Completed = true
+		now := time.Now()
+		mergeState.End = &now
+		err = worker.DB(m.dbname).C("merges").UpdateId(mergeID, bson.M{"$set": mergeState})
 		if err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
 			return

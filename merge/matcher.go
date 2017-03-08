@@ -24,9 +24,13 @@ var (
 	// match for the whole resource to be considered a match.
 	MatchThreshold = 0.8
 
-	// ErrNoPatientMatch indicates that the patient resources in the bundles didn't exist or didn't match.
-	// A merge cannot continue if there aren't minimally matching patients.
-	ErrNoPatientMatch = errors.New("Patient resources do not match")
+	// ErrNoPatientResource occurs if a Patient resource is not found in one or both
+	// source bundles.
+	ErrNoPatientResource = errors.New("Patient resource not found in one or both source bundles")
+
+	// ErrDuplicatePatientResource occurs if more than one Patient resource is found
+	// in either source bundle.
+	ErrDuplicatePatientResource = errors.New("Duplicate Patient resources found in one or both source bundles")
 )
 
 // Matcher provides tools for identifying all resources in 2 source bundles that "match".
@@ -59,7 +63,7 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 	// If the Patient resource is not in matchableResourceTypes, return an error.
 	// Minimally we need a single, matching Patient object to perform a merge.
 	if !contains(matchableResourceTypes, "Patient") {
-		return nil, nil, errors.New("Patient resource not found in one or both bundles")
+		return nil, nil, ErrNoPatientResource
 	}
 
 	// Handle all of the unmatchable resource types.
@@ -78,16 +82,28 @@ func (m *Matcher) Match(leftBundle, rightBundle *models.Bundle) (matches []Match
 		lefts := leftResources[resourceType]
 		rights := rightResources[resourceType]
 
-		// Performs matching without replacement, always comparing the next available left
-		// to the remaining rights.
+		// Always match the patient resource, even if there are many conflicts.
+		// This allows bundles that are seemingly dissimilar to be merged.
+		if resourceType == "Patient" {
+			if len(lefts) > 1 || len(rights) > 1 {
+				// Cannot handle duplicate Patient resources.
+				return nil, nil, ErrDuplicatePatientResource
+			}
+
+			// Create a match for the Patient resources.
+			matches = append(matches, Match{
+				ResourceType: "Patient",
+				Left:         lefts[0],
+				Right:        rights[0],
+			})
+			continue
+		}
+
+		// For all other resource types, perform matching without replacement.
+		// This always compares the next available left to the remaining rights.
 		someMatches, someUnmatchables, err := m.matchWithoutReplacement(lefts, rights)
 		if err != nil {
 			return nil, nil, err
-		}
-
-		if resourceType == "Patient" && len(someMatches) == 0 {
-			// There was no matching Patient resource.
-			return nil, nil, ErrNoPatientMatch
 		}
 
 		matches = append(matches, someMatches...)
