@@ -269,8 +269,12 @@ func (s *ServerTestSuite) TestMergeSomeConflicts() {
 
 	// Validate the mergeState.
 	s.Equal(mergeID, mergeState.MergeID)
+	s.Equal(source1, mergeState.Source1URL)
+	s.Equal(source2, mergeState.Source2URL)
 	s.Equal(s.FHIRServer.URL+"/Bundle/"+targetBundle.Id, mergeState.TargetURL)
 	s.False(mergeState.Completed)
+	s.NotNil(mergeState.Start)
+	s.Nil(mergeState.End)
 	s.Len(mergeState.Conflicts, 2)
 
 	// Patient conflict metadata.
@@ -625,8 +629,12 @@ func (s *ServerTestSuite) TestResolveConflictNoMoreConflicts() {
 
 	// Validate the mergeState.
 	s.Equal(mergeID, mergeState.MergeID)
+	s.Equal(source1, mergeState.Source1URL)
+	s.Equal(source2, mergeState.Source2URL)
 	s.Equal(s.FHIRServer.URL+"/Bundle/"+targetBundle.Id, mergeState.TargetURL)
 	s.True(mergeState.Completed)
+	s.NotNil(mergeState.Start)
+	s.NotNil(mergeState.End)
 	s.Len(mergeState.Conflicts, 2)
 
 	// The patient conflict should now be resolved.
