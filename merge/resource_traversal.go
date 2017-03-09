@@ -36,7 +36,7 @@ func traverse(value reflect.Value, paths PathMap, path string) {
 		// Traverse all non-nil fields in the struct, building up their json paths.
 		for i := 0; i < value.NumField(); i++ {
 			jsonPath := value.Type().Field(i).Tag.Get("json")
-			// jsonPath will be empty for inline resourced (e.g. DomainResource).
+			// jsonPath will be empty for inline resources (e.g. DomainResource).
 			if jsonPath != "" {
 				prefix := ""
 				// The path is empty if we're currently traversing the top-level object (e.g. Patient).
